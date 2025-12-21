@@ -58,10 +58,16 @@ class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var currentPlaylist: [MPMediaItem] = []
     @Published private(set) var currentIndex: Int? = nil
     
-    // playback mode settings
-    @Published var shuffleEnabled: Bool = false
-    @Published var repeatMode: RepeatMode = .off
-    @Published var autoplayEnabled: Bool = true
+    // playback mode settings (persisted to UserDefaults)
+    @Published var shuffleEnabled: Bool = false {
+        didSet { UserDefaults.standard.set(shuffleEnabled, forKey: "shuffleEnabled") }
+    }
+    @Published var repeatMode: RepeatMode = .off {
+        didSet { UserDefaults.standard.set(repeatMode.rawValue, forKey: "repeatMode") }
+    }
+    @Published var autoplayEnabled: Bool = true {
+        didSet { UserDefaults.standard.set(autoplayEnabled, forKey: "autoplayEnabled") }
+    }
     
     // original playlist order (before shuffle)
     private var originalPlaylist: [MPMediaItem] = []
@@ -139,16 +145,59 @@ class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         // setup remote command center for control center and lock screen
         setupRemoteCommandCenter()
         
+        // observe audio route changes (headphone/bluetooth disconnect)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRouteChange),
+            name: AVAudioSession.routeChangeNotification,
+            object: nil
+        )
+        
         // request media library permission
         checkPermission()
         
         // start timer for progress updates
         startTimer()
+        
+        // load persisted playback settings
+        loadPersistedSettings()
+    }
+    
+    private func loadPersistedSettings() {
+        shuffleEnabled = UserDefaults.standard.bool(forKey: "shuffleEnabled")
+        if let savedRepeat = UserDefaults.standard.string(forKey: "repeatMode"),
+           let mode = RepeatMode(rawValue: savedRepeat) {
+            repeatMode = mode
+        }
+        // autoplay defaults to true if not set
+        if UserDefaults.standard.object(forKey: "autoplayEnabled") != nil {
+            autoplayEnabled = UserDefaults.standard.bool(forKey: "autoplayEnabled")
+        }
     }
     
     deinit {
         timer?.invalidate()
         crossfadeTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    // MARK: - Audio Route Change Handler
+    
+    @objc private func handleRouteChange(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+        
+        if reason == .oldDeviceUnavailable {
+            // headphones/bluetooth disconnected - pause playback
+            DispatchQueue.main.async {
+                if self.isPlaying {
+                    self.audioPlayer?.pause()
+                    self.crossfadePlayer?.pause()
+                    self.isPlaying = false
+                }
+            }
+        }
     }
     
     // MARK: - Permission
@@ -416,6 +465,9 @@ class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
     
     func next() {
+        // cancel any ongoing crossfade to prevent dual playback
+        cancelCrossfade()
+        
         guard !currentPlaylist.isEmpty, let index = currentIndex else { return }
         
         // check if we're at the end
@@ -438,6 +490,9 @@ class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
     
     func previous() {
+        // cancel any ongoing crossfade to prevent dual playback
+        cancelCrossfade()
+        
         guard !currentPlaylist.isEmpty, let index = currentIndex else { return }
         
         // if more than 3 seconds into song, restart it
@@ -675,6 +730,24 @@ class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         updateNowPlayingInfo()
         LastFMManager.shared.nowPlaying(song)
         
+        isCrossfading = false
+    }
+    
+    private func cancelCrossfade() {
+        guard isCrossfading else { return }
+        
+        // stop the crossfade timer
+        crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
+        
+        // stop and clear the crossfade player
+        crossfadePlayer?.stop()
+        crossfadePlayer = nil
+        
+        // restore main player volume
+        audioPlayer?.volume = 1.0
+        
+        // reset flag
         isCrossfading = false
     }
     

@@ -282,7 +282,7 @@ struct NowPlayingView: View {
                 .fontWeight(.semibold)
                 .foregroundColor(.white)
             
-            Text("Select a song from the Library to start playing")
+            Text("Select a song from the Jukebox to start playing")
                 .font(.subheadline)
                 .foregroundColor(.white.opacity(0.7))
                 .multilineTextAlignment(.center)

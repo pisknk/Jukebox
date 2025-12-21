@@ -155,7 +155,7 @@ struct CollectionsView: View {
                 }
                 .padding(.top, 8)
             }
-            .navigationTitle("Library")
+            .navigationTitle("Collections")
         }
     }
     

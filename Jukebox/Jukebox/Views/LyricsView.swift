@@ -147,27 +147,46 @@ struct LyricsView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 28) {
                     ForEach(Array(lyrics.enumerated()), id: \.offset) { index, line in
-                        Text(line.text)
-                            .font(.system(
-                                size: index == currentIndex ? 32 : 30,
-                                weight: .bold
-                            ))
-                            .foregroundColor(.white)
-                            .opacity(opacityFor(index))
-                            .blur(radius: blurFor(index))
-                            .scaleEffect(index == currentIndex ? 1.02 : 1.0)
-                            .id(index)
-                            .animation(.spring(response: 0.4, dampingFraction: 0.75), value: currentIndex)
-                            .animation(.easeInOut(duration: 0.3), value: isUserScrolling)
-                            .onTapGesture {
-                                seekToLine(index)
+                        VStack(alignment: .leading, spacing: 8) {
+                            // main lyric line
+                            // current line: show without parenthetical (it's shown as subtitle)
+                            // other lines: strip parenthetical completely (only show when it's their turn)
+                            Text(stripParenthetical(line.text))
+                                .font(.system(
+                                    size: index == currentIndex ? 32 : 30,
+                                    weight: .bold
+                                ))
+                                .foregroundColor(.white)
+                                .opacity(opacityFor(index))
+                                .blur(radius: blurFor(index))
+                                .scaleEffect(index == currentIndex ? 1.02 : 1.0)
+                                .offset(y: index == currentIndex ? 0 : 0)
+                                .fixedSize(horizontal: false, vertical: true)
+                                // bouncy spring animation when lyric becomes current
+                                .animation(.spring(response: 0.35, dampingFraction: 0.5, blendDuration: 0.2), value: currentIndex)
+                                .animation(.easeInOut(duration: 0.3), value: isUserScrolling)
+                            
+                            // parenthetical subtitle (show CURRENT line's own parenthetical)
+                            if index == currentIndex, let subtitle = extractParenthetical(from: line.text) {
+                                Text(subtitle)
+                                    .font(.system(size: 22, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.65))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
                             }
+                        }
+                        .padding(.leading, 20)
+                        .padding(.trailing, 60)
+                        .id(index)
+                        // animate all lines as they change position
+                        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: currentIndex)
+                        .onTapGesture {
+                            seekToLine(index)
+                        }
                     }
                     Spacer().frame(height: 300)
                 }
                 .padding(.top, 16)
-                .padding(.leading, 20)
-                .padding(.trailing, 28)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .simultaneousGesture(
@@ -190,12 +209,39 @@ struct LyricsView: View {
             )
             .onChange(of: currentIndex) { idx in
                 if !isUserScrolling {
-                    withAnimation(.easeInOut(duration: 0.3)) {
+                    // smooth spring animation for scroll movement
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                         proxy.scrollTo(idx, anchor: .top)
                     }
                 }
             }
         }
+    }
+    
+    // MARK: - Parenthetical Helpers
+    
+    /// extract text inside () from a string
+    private func extractParenthetical(from text: String) -> String? {
+        guard let openParen = text.firstIndex(of: "("),
+              let closeParen = text.firstIndex(of: ")"),
+              openParen < closeParen else { return nil }
+        
+        let start = text.index(after: openParen)
+        let content = String(text[start..<closeParen]).trimmingCharacters(in: .whitespaces)
+        return content.isEmpty ? nil : content
+    }
+    
+    /// remove parenthetical text from a string for cleaner display
+    private func stripParenthetical(_ text: String) -> String {
+        // remove (content) pattern but keep the rest
+        guard let openParen = text.firstIndex(of: "("),
+              let closeParen = text.firstIndex(of: ")"),
+              openParen < closeParen else { return text }
+        
+        var result = text
+        let rangeToRemove = openParen...closeParen
+        result.removeSubrange(rangeToRemove)
+        return result.trimmingCharacters(in: .whitespaces)
     }
     
     // MARK: - Helpers
@@ -223,6 +269,8 @@ struct LyricsView: View {
     
     private func blurFor(_ index: Int) -> CGFloat {
         let dist = index - currentIndex
+        
+        // previous line and current line: no blur
         if dist <= 0 { return 0 }
         
         // when user is scrolling, reduce blur to show lyrics clearly

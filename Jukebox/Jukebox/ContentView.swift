@@ -11,7 +11,7 @@ import MediaPlayer
 struct ContentView: View {
     @EnvironmentObject var musicManager: MusicPlayerManager
     @State private var showNowPlaying = false
-    @State private var selectedTab: Int = 0
+    @AppStorage("selectedTab") private var selectedTab: Int = 0
     
     // calculate bottom safe area for proper tab bar positioning
     private var tabBarHeight: CGFloat { 49 }
@@ -300,12 +300,12 @@ struct NowPlayingModalView: View {
             if let song = musicManager.currentSong, let artwork = song.artwork {
                 let imageSize = CGSize(width: 400, height: 400)
                 if let image = artwork.image(at: imageSize) {
-                    AlbumFluidGradient(image: image)
+                    AlbumFluidGradient(image: image, isAnimating: true)
                 } else {
-                    FluidGradientView(colors: [.purple, .blue, .pink, .orange], speed: 0.3)
+                    FluidGradientView(colors: [.purple, .blue, .pink, .orange], speed: 0.3, isAnimating: true)
                 }
             } else {
-                FluidGradientView(colors: [.gray, .brown, .black], speed: 0.2)
+                FluidGradientView(colors: [.gray, .brown, .black], speed: 0.2, isAnimating: true)
             }
         }
     }
@@ -507,7 +507,7 @@ struct NowPlayingModalView: View {
                 .fontWeight(.semibold)
                 .foregroundColor(.white)
             
-            Text("Select a song from the Library to start playing")
+            Text("Select a song from the Jukebox to start playing")
                 .font(.subheadline)
                 .foregroundColor(.white.opacity(0.7))
                 .multilineTextAlignment(.center)

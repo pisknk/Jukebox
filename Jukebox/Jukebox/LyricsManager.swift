@@ -85,16 +85,11 @@ final class LyricsManager {
                 return
             }
             
-            // prefer synced lyrics, fallback to plain
+            // only use synced lyrics (ignore plain lyrics as they lack timestamps)
             var lyrics: [LyricLine]?
             
             if let syncedLyrics = json["syncedLyrics"] as? String, !syncedLyrics.isEmpty {
                 lyrics = self.parseLRC(syncedLyrics)
-            } else if let plainLyrics = json["plainLyrics"] as? String, !plainLyrics.isEmpty {
-                // no timestamps, just split by lines
-                lyrics = plainLyrics.components(separatedBy: "\n")
-                    .enumerated()
-                    .map { LyricLine(time: TimeInterval($0.offset), text: $0.element) }
             }
             
             // cache result persistently

@@ -141,177 +141,95 @@ struct MeshPoint: Equatable {
     }
 }
 
-// MARK: - Animated Mesh Gradient View (MeshKit-style)
+// MARK: - Smooth Animated Mesh Gradient View
 struct MeshGradientView: View {
     let colors: [Color]
     let speed: Double
+    let isAnimating: Bool
     
-    @State private var phase: Double = 0
+    @State private var animationProgress: CGFloat = 0
     
-    init(colors: [Color], speed: Double = 0.5) {
+    init(colors: [Color], speed: Double = 0.5, isAnimating: Bool = true) {
         self.colors = colors
         self.speed = speed
+        self.isAnimating = isAnimating
     }
     
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1/60)) { timeline in
-            let time = timeline.date.timeIntervalSinceReferenceDate * speed
+        TimelineView(.animation(minimumInterval: 1/60, paused: !isAnimating)) { timeline in
+            let time = isAnimating ? timeline.date.timeIntervalSinceReferenceDate * speed : 0
             
             Canvas { context, size in
-                // create a 3x3 mesh grid of colors
+                // draw a 3x3 grid of animated color blobs
                 let gridSize = 3
-                var points: [[MeshPoint]] = []
                 
                 for row in 0..<gridSize {
-                    var rowPoints: [MeshPoint] = []
                     for col in 0..<gridSize {
-                        let colorIndex = row * gridSize + col
-                        let color = colorIndex < colors.count ? colors[colorIndex] : colors[colorIndex % max(1, colors.count)]
+                        let colorIndex = (row * gridSize + col) % colors.count
+                        let color = colors[colorIndex]
                         
-                        // base position
-                        let baseX = CGFloat(col) / CGFloat(gridSize - 1)
-                        let baseY = CGFloat(row) / CGFloat(gridSize - 1)
+                        // base grid position
+                        let baseX = (CGFloat(col) + 0.5) / CGFloat(gridSize) * size.width
+                        let baseY = (CGFloat(row) + 0.5) / CGFloat(gridSize) * size.height
                         
-                        // animated offset - much more movement for visible animation
-                        _ = row == 1 && col == 1
-                        let isEdge = row == 0 || row == gridSize - 1 || col == 0 || col == gridSize - 1
-                        let isCorner = (row == 0 || row == gridSize - 1) && (col == 0 || col == gridSize - 1)
+                        // smooth wave animation for each point - faster movement
+                        let phaseOffset = Double(row * gridSize + col) * 0.8
+                        let wave1 = Darwin.sin(time * 1.2 + phaseOffset)
+                        let wave2 = Darwin.cos(time * 0.9 + phaseOffset * 1.3)
+                        let wave3 = Darwin.sin(time * 0.7 + phaseOffset * 0.5)
                         
-                        // corners barely move, edges move a little, center moves a lot
-                        let movementScale: CGFloat = isCorner ? 0.08 : (isEdge ? 0.20 : 0.35)
+                        // calculate animated position with more noticeable movement
+                        let moveRange = min(size.width, size.height) * 0.25
+                        let x = baseX + CGFloat(wave1 + wave3 * 0.5) * moveRange
+                        let y = baseY + CGFloat(wave2 + wave3 * 0.3) * moveRange
                         
-                        let phaseOffset = Double(colorIndex) * 0.9
+                        // draw large overlapping radial gradient
+                        let blobRadius = max(size.width, size.height) * 0.5
+                        let rect = CGRect(
+                            x: x - blobRadius,
+                            y: y - blobRadius,
+                            width: blobRadius * 2,
+                            height: blobRadius * 2
+                        )
                         
-                        // use multiple sine waves for more organic, fluid movement
-                        // lower frequencies for smoother animation
-                        let wave1 = sin(time * 0.35 + phaseOffset)
-                        let wave2 = sin(time * 0.55 + phaseOffset * 1.5) * 0.5
-                        let wave3 = cos(time * 0.25 + phaseOffset * 0.7) * 0.3
+                        let gradient = Gradient(colors: [
+                            color.opacity(0.85),
+                            color.opacity(0.4),
+                            color.opacity(0.0)
+                        ])
                         
-                        let xOffset = (wave1 + wave2) * movementScale
-                        let yOffset = (wave3 + cos(time * 0.4 + phaseOffset)) * movementScale
-                        
-                        let x = (baseX + xOffset) * size.width
-                        let y = (baseY + yOffset) * size.height
-                        
-                        rowPoints.append(MeshPoint(position: CGPoint(x: x, y: y), color: color))
-                    }
-                    points.append(rowPoints)
-                }
-                
-                // draw interpolated mesh using overlapping gradients
-                for row in 0..<(gridSize - 1) {
-                    for col in 0..<(gridSize - 1) {
-                        // get four corners of this cell
-                        let topLeft = points[row][col]
-                        let topRight = points[row][col + 1]
-                        let bottomLeft = points[row + 1][col]
-                        let bottomRight = points[row + 1][col + 1]
-                        
-                        // draw cell with blended gradient
-                        drawMeshCell(
-                            context: context,
-                            topLeft: topLeft,
-                            topRight: topRight,
-                            bottomLeft: bottomLeft,
-                            bottomRight: bottomRight,
-                            size: size,
-                            time: time
+                        context.fill(
+                            Path(ellipseIn: rect),
+                            with: .radialGradient(
+                                gradient,
+                                center: CGPoint(x: x, y: y),
+                                startRadius: 0,
+                                endRadius: blobRadius
+                            )
                         )
                     }
                 }
             }
         }
-        .background(
-            // use darkened version of first color as base background
-            colors.first?.opacity(0.6) ?? Color.black
-        )
-        .blur(radius: 50)
-    }
-    
-    private func drawMeshCell(
-        context: GraphicsContext,
-        topLeft: MeshPoint,
-        topRight: MeshPoint,
-        bottomLeft: MeshPoint,
-        bottomRight: MeshPoint,
-        size: CGSize,
-        time: Double
-    ) {
-        // create a path for this cell
-        let path = Path { p in
-            p.move(to: topLeft.position)
-            p.addLine(to: topRight.position)
-            p.addLine(to: bottomRight.position)
-            p.addLine(to: bottomLeft.position)
-            p.closeSubpath()
-        }
-        
-        // calculate center point
-        let centerX = (topLeft.position.x + topRight.position.x + bottomLeft.position.x + bottomRight.position.x) / 4
-        let centerY = (topLeft.position.y + topRight.position.y + bottomLeft.position.y + bottomRight.position.y) / 4
-        let center = CGPoint(x: centerX, y: centerY)
-        
-        // animated opacity for pulsing effect
-        let pulseOpacity = 0.8 + sin(time * 2.0) * 0.15
-        
-        // blend all four colors with pulsing
-        let gradient = Gradient(stops: [
-            .init(color: topLeft.color.opacity(pulseOpacity), location: 0.0),
-            .init(color: topRight.color.opacity(pulseOpacity * 0.9), location: 0.33),
-            .init(color: bottomLeft.color.opacity(pulseOpacity * 0.9), location: 0.66),
-            .init(color: bottomRight.color.opacity(pulseOpacity), location: 1.0)
-        ])
-        
-        // draw radial gradient in cell
-        let radius = max(size.width, size.height) * 0.6
-        context.fill(path, with: .radialGradient(
-            gradient,
-            center: center,
-            startRadius: 0,
-            endRadius: radius
-        ))
-        
-        // draw additional corner gradients for smoother blending with animated sizes
-        let points = [topLeft, topRight, bottomLeft, bottomRight]
-        for (index, point) in points.enumerated() {
-            let sizeWave = 0.35 + sin(time * 1.5 + Double(index) * 0.8) * 0.1
-            let opacityWave = 0.5 + sin(time * 1.2 + Double(index) * 1.1) * 0.2
-            
-            let cornerGradient = Gradient(colors: [
-                point.color.opacity(opacityWave),
-                point.color.opacity(0.0)
-            ])
-            
-            let cornerPath = Path(ellipseIn: CGRect(
-                x: point.position.x - size.width * sizeWave,
-                y: point.position.y - size.height * sizeWave,
-                width: size.width * sizeWave * 2,
-                height: size.height * sizeWave * 2
-            ))
-            
-            context.fill(cornerPath, with: .radialGradient(
-                cornerGradient,
-                center: point.position,
-                startRadius: 0,
-                endRadius: size.width * sizeWave
-            ))
-        }
+        .background(colors.first?.opacity(0.7) ?? Color.black)
+        .blur(radius: 40)
+        .drawingGroup() // rasterize for smoother performance
     }
 }
 
 // MARK: - Album Art Mesh Gradient
 struct AlbumFluidGradient: View {
     let image: UIImage?
+    var isAnimating: Bool = true
     
     @State private var extractedColors: [Color] = []
     
     var body: some View {
         Group {
             if extractedColors.isEmpty {
-                MeshGradientView(colors: UIImage.defaultGradientColors(), speed: 0.5)
+                MeshGradientView(colors: UIImage.defaultGradientColors(), speed: 0.5, isAnimating: isAnimating)
             } else {
-                MeshGradientView(colors: extractedColors, speed: 0.5)
+                MeshGradientView(colors: extractedColors, speed: 0.5, isAnimating: isAnimating)
             }
         }
         .ignoresSafeArea()
@@ -342,14 +260,16 @@ struct FluidGradientView: View {
     let colors: [Color]
     let speed: Double
     let blur: CGFloat
+    var isAnimating: Bool = true
     
-    init(colors: [Color], speed: Double = 0.5, blur: CGFloat = 80) {
+    init(colors: [Color], speed: Double = 0.5, blur: CGFloat = 80, isAnimating: Bool = true) {
         self.colors = colors
         self.speed = speed
         self.blur = blur
+        self.isAnimating = isAnimating
     }
     
     var body: some View {
-        MeshGradientView(colors: colors, speed: speed)
+        MeshGradientView(colors: colors, speed: speed, isAnimating: isAnimating)
     }
 }
