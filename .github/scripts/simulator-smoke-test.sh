@@ -36,7 +36,10 @@ xcrun simctl spawn "$UDID" log stream --level debug --style compact \
 LOG_PID=$!
 
 is_running() {
-  xcrun simctl spawn "$UDID" launchctl list | grep -q "$BUNDLE_ID"
+  # read the whole list first: piping into `grep -q` can kill launchctl with SIGPIPE
+  local services
+  services=$(xcrun simctl spawn "$UDID" launchctl list)
+  [[ "$services" == *"$BUNDLE_ID"* ]]
 }
 
 check_tab() {
