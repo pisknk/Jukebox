@@ -205,7 +205,8 @@ struct LibraryView: View {
         if musicManager.hasPermission {
             if musicManager.songs.isEmpty {
                 emptyState
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: AppDesign.isNativeGlass ? .infinity : nil,
+                           maxHeight: AppDesign.isNativeGlass ? .infinity : nil)
             } else {
                 VStack(spacing: 0) {
                     headerButtons
@@ -214,7 +215,8 @@ struct LibraryView: View {
             }
         } else {
             permissionDeniedState
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: AppDesign.isNativeGlass ? .infinity : nil,
+                       maxHeight: AppDesign.isNativeGlass ? .infinity : nil)
         }
     }
 

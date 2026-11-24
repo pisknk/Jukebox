@@ -154,16 +154,8 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundColor(.orange)
             }
-        } else {
-            HStack {
-                Text("Design Language")
-                Spacer()
-                Text(DesignLanguage.amity.displayName).foregroundColor(.secondary)
-            }
-            Text("Native Glass needs iOS 26 or later.")
-                .font(.footnote)
-                .foregroundColor(.secondary)
         }
+        // before iOS 26 Amity 1.0 is the only design, so there's nothing to choose
     }
     
     // MARK: - logged in view

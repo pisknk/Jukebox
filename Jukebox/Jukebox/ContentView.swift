@@ -527,7 +527,7 @@ struct NowPlayingModalView: View {
                     .adaptiveGlass(in: Circle())
             }
         }
-        .buttonStyle(.plain)
+        .modifier(NativeGlassPlainButtons())
         .padding(.top, 24)
         .padding(.bottom, 40)
         
@@ -604,6 +604,17 @@ struct NowPlayingModalView: View {
         .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
     }
     
+}
+
+/// plain buttons so the glass circles aren't tinted; Amity keeps the default style
+private struct NativeGlassPlainButtons: ViewModifier {
+    func body(content: Content) -> some View {
+        if AppDesign.isNativeGlass {
+            content.buttonStyle(.plain)
+        } else {
+            content
+        }
+    }
 }
 
 // MARK: - Now Playing Progress
