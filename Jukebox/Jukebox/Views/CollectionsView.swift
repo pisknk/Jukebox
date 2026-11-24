@@ -152,7 +152,7 @@ struct CollectionsView: View {
                         }
                     }
                     
-                    Spacer(minLength: 100)
+                    Spacer(minLength: AppDesign.legacyBottomSpace(100))
                 }
                 .padding(.top, 8)
             }
@@ -274,9 +274,11 @@ struct PlaylistsListView: View {
     var body: some View {
         VStack(spacing: 0) {
             // search bar
-            SearchBar(text: $searchText, placeholder: "Search playlists...")
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+            if !AppDesign.isNativeGlass {
+                SearchBar(text: $searchText, placeholder: "Search playlists...")
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+            }
             
             List {
                 // New Playlist Button
@@ -387,13 +389,14 @@ struct PlaylistsListView: View {
                 // bottom spacer for tab bar + mini player
                 Section {
                     Color.clear
-                        .frame(height: 100)
+                        .frame(height: AppDesign.legacyBottomSpace(100))
                         .listRowBackground(Color.clear)
                 }
             }
             .listStyle(.grouped)
         }
         .navigationTitle("Playlists")
+        .adaptiveSearchable(text: $searchText, prompt: "Search playlists")
         .onAppear {
             applePlaylists = LibraryQueries.appleMusicPlaylists()
         }
@@ -424,9 +427,11 @@ struct AlbumsListView: View {
         
         ScrollView {
             // search bar
-            SearchBar(text: $searchText, placeholder: "Search albums...")
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
+            if !AppDesign.isNativeGlass {
+                SearchBar(text: $searchText, placeholder: "Search albums...")
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+            }
             
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(albums, id: \.persistentID) { album in
@@ -438,9 +443,10 @@ struct AlbumsListView: View {
             
             // bottom spacer for tab bar + mini player
             Color.clear
-                .frame(height: 140)
+                .frame(height: AppDesign.legacyBottomSpace(140))
         }
         .navigationTitle("Albums")
+        .adaptiveSearchable(text: $searchText, prompt: "Search albums")
         .onAppear {
             if allAlbums.isEmpty { allAlbums = LibraryQueries.allAlbums() }
         }
@@ -461,9 +467,11 @@ struct ArtistsListView: View {
         
         VStack(spacing: 0) {
             // search bar
-            SearchBar(text: $searchText, placeholder: "Search artists...")
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+            if !AppDesign.isNativeGlass {
+                SearchBar(text: $searchText, placeholder: "Search artists...")
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+            }
             
             List {
                 ForEach(artists, id: \.persistentID) { artist in
@@ -475,7 +483,7 @@ struct ArtistsListView: View {
                 
                 // bottom spacer for tab bar + mini player
                 Color.clear
-                    .frame(height: 140)
+                    .frame(height: AppDesign.legacyBottomSpace(140))
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -483,6 +491,7 @@ struct ArtistsListView: View {
             .listStyle(.plain)
         }
         .navigationTitle("Artists")
+        .adaptiveSearchable(text: $searchText, prompt: "Search artists")
         .onAppear {
             if allArtists.isEmpty { allArtists = LibraryQueries.allArtists() }
         }
@@ -579,9 +588,11 @@ struct SongsListView: View {
     var body: some View {
         VStack(spacing: 0) {
             // search bar
-            SearchBar(text: $searchText, placeholder: "Search songs...")
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+            if !AppDesign.isNativeGlass {
+                SearchBar(text: $searchText, placeholder: "Search songs...")
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+            }
             
             List {
                 // play/shuffle buttons
@@ -647,13 +658,14 @@ struct SongsListView: View {
                 // bottom spacer for tab bar + mini player
                 Section {
                     Color.clear
-                        .frame(height: 100)
+                        .frame(height: AppDesign.legacyBottomSpace(100))
                         .listRowBackground(Color.clear)
                 }
             }
             .listStyle(.plain)
         }
         .navigationTitle("Songs")
+        .adaptiveSearchable(text: $searchText, prompt: "Search songs")
         .sheet(item: $selectedSong) { song in
             AddToPlaylistView(song: song)
         }
@@ -684,9 +696,11 @@ struct FavouritesView: View {
     var body: some View {
         VStack(spacing: 0) {
             // search bar
-            SearchBar(text: $searchText, placeholder: "Search favourites...")
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+            if !AppDesign.isNativeGlass {
+                SearchBar(text: $searchText, placeholder: "Search favourites...")
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+            }
             
             Group {
                 if favoriteSongs.isEmpty && searchText.isEmpty {
@@ -697,6 +711,7 @@ struct FavouritesView: View {
             }
         }
         .navigationTitle("Favourites")
+        .adaptiveSearchable(text: $searchText, prompt: "Search favourites")
     }
     
     private var favoritesListView: some View {
@@ -748,7 +763,7 @@ struct FavouritesView: View {
             // bottom spacer for tab bar + mini player
             Section {
                 Color.clear
-                    .frame(height: 100)
+                    .frame(height: AppDesign.legacyBottomSpace(100))
                     .listRowBackground(Color.clear)
             }
         }
@@ -905,7 +920,7 @@ struct AppleMusicPlaylistView: View {
                 // bottom spacer for tab bar + mini player
                 Section {
                     Color.clear
-                        .frame(height: 100)
+                        .frame(height: AppDesign.legacyBottomSpace(100))
                         .listRowBackground(Color.clear)
                 }
             }

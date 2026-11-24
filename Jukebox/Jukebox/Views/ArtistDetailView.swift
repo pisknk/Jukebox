@@ -87,7 +87,7 @@ struct ArtistDetailView: View {
                     }
                 }
 
-                Spacer(minLength: 100)
+                Spacer(minLength: AppDesign.legacyBottomSpace(100))
             }
         }
         .navigationTitle(artistName)

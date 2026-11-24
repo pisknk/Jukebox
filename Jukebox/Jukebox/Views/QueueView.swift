@@ -61,6 +61,7 @@ struct QueueView: View {
                             .padding(.vertical, 14)
                             .background(musicManager.shuffleEnabled ? Color.white.opacity(0.25) : Color.white.opacity(0.1))
                             .cornerRadius(10)
+                            .adaptiveGlass(in: RoundedRectangle(cornerRadius: 10))
                     }
                     
                     // repeat button
@@ -72,6 +73,7 @@ struct QueueView: View {
                             .padding(.vertical, 14)
                             .background(musicManager.repeatMode != .off ? Color.white.opacity(0.25) : Color.white.opacity(0.1))
                             .cornerRadius(10)
+                            .adaptiveGlass(in: RoundedRectangle(cornerRadius: 10))
                     }
                     
                     // autoplay button
@@ -83,6 +85,7 @@ struct QueueView: View {
                             .padding(.vertical, 14)
                             .background(musicManager.autoplayEnabled ? Color.white.opacity(0.25) : Color.white.opacity(0.1))
                             .cornerRadius(10)
+                            .adaptiveGlass(in: RoundedRectangle(cornerRadius: 10))
                     }
                 }
                 .padding(.horizontal, 20)

@@ -172,7 +172,7 @@ struct AlbumDetailView: View {
                     }
                 }
                 
-                Spacer(minLength: 100)
+                Spacer(minLength: AppDesign.legacyBottomSpace(100))
             }
             .padding(.top, 20)
         }

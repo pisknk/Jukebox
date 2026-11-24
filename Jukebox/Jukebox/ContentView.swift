@@ -9,6 +9,18 @@ import SwiftUI
 import MediaPlayer
 
 struct ContentView: View {
+    var body: some View {
+        // the design is fixed for the whole launch (see AppDesign)
+        if #available(iOS 26, *), AppDesign.isNativeGlass {
+            NativeGlassRootView()
+        } else {
+            AmityRootView()
+        }
+    }
+}
+
+// MARK: - Amity 1.0 (custom chrome)
+struct AmityRootView: View {
     @EnvironmentObject var musicManager: MusicPlayerManager
     @State private var showNowPlaying = false
     @AppStorage("selectedTab") private var selectedTab: Int = 0
@@ -95,6 +107,105 @@ struct ContentView: View {
             
             if !musicManager.hasPermission && MPMediaLibrary.authorizationStatus() == .notDetermined {
                 musicManager.checkPermission()
+            }
+        }
+    }
+}
+
+// MARK: - Native Glass (iOS 26 system chrome)
+@available(iOS 26, *)
+struct NativeGlassRootView: View {
+    @EnvironmentObject var musicManager: MusicPlayerManager
+    @State private var showNowPlaying = false
+    @AppStorage("selectedTab") private var selectedTab: Int = 0
+
+    var body: some View {
+        TabView(selection: $selectedTab) {
+            Tab("Jukebox", systemImage: "music.note.list", value: 0) {
+                LibraryView()
+            }
+            Tab("Collections", systemImage: "square.grid.2x2", value: 1) {
+                CollectionsView()
+            }
+        }
+        .tabBarMinimizeBehavior(.onScrollDown)
+        .tabViewBottomAccessory {
+            NativeMiniPlayer(showNowPlaying: $showNowPlaying)
+        }
+        .sheet(isPresented: $showNowPlaying) {
+            NowPlayingModalView(isPresented: $showNowPlaying)
+                .environmentObject(musicManager)
+        }
+        .onAppear {
+            if !musicManager.hasPermission && MPMediaLibrary.authorizationStatus() == .notDetermined {
+                musicManager.checkPermission()
+            }
+        }
+    }
+}
+
+/// the mini player in the tab bar's accessory slot (like the Music app)
+@available(iOS 26, *)
+struct NativeMiniPlayer: View {
+    @EnvironmentObject var musicManager: MusicPlayerManager
+    @Binding var showNowPlaying: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Group {
+                if let image = musicManager.currentArtwork {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    ZStack {
+                        Color.gray.opacity(0.3)
+                        Image(systemName: "music.note")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .frame(width: 32, height: 32)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(musicManager.currentSong?.title ?? "Not Playing")
+                    .font(.system(size: 14, weight: .medium))
+                    .lineLimit(1)
+                if let artist = musicManager.currentSong?.artist {
+                    Text(artist)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            Button(action: { musicManager.togglePlayPause() }) {
+                Image(systemName: musicManager.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 18))
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(musicManager.currentSong == nil)
+
+            Button(action: { musicManager.next() }) {
+                Image(systemName: "forward.fill")
+                    .font(.system(size: 16))
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(musicManager.currentSong == nil)
+        }
+        .padding(.horizontal, 12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if musicManager.currentSong != nil {
+                showNowPlaying = true
             }
         }
     }
@@ -384,25 +495,32 @@ struct NowPlayingModalView: View {
         Spacer().frame(height: 40)
         
         // playback controls - moved lower
-        HStack(spacing: 50) {
+        HStack(spacing: AppDesign.isNativeGlass ? 28 : 50) {
             Button(action: { musicManager.previous() }) {
                 Image(systemName: "backward.fill")
                     .font(.system(size: 28))
                     .foregroundColor(.white)
+                    .frame(width: AppDesign.isNativeGlass ? 64 : nil, height: AppDesign.isNativeGlass ? 64 : nil)
+                    .adaptiveGlass(in: Circle())
             }
             
             Button(action: { musicManager.togglePlayPause() }) {
                 Image(systemName: musicManager.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 56))
+                    .font(.system(size: AppDesign.isNativeGlass ? 40 : 56))
                     .foregroundColor(.white)
+                    .frame(width: AppDesign.isNativeGlass ? 88 : nil, height: AppDesign.isNativeGlass ? 88 : nil)
+                    .adaptiveGlass(in: Circle())
             }
             
             Button(action: { musicManager.next() }) {
                 Image(systemName: "forward.fill")
                     .font(.system(size: 28))
                     .foregroundColor(.white)
+                    .frame(width: AppDesign.isNativeGlass ? 64 : nil, height: AppDesign.isNativeGlass ? 64 : nil)
+                    .adaptiveGlass(in: Circle())
             }
         }
+        .buttonStyle(.plain)
         .padding(.top, 24)
         .padding(.bottom, 40)
         

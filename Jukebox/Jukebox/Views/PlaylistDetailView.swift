@@ -301,7 +301,7 @@ struct PlaylistDetailView: View {
             // bottom spacer for tab bar + mini player
             Section {
                 Color.clear
-                    .frame(height: 100)
+                    .frame(height: AppDesign.legacyBottomSpace(100))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -409,9 +409,11 @@ struct AddSongsToPlaylistView: View {
         NavigationView {
             VStack(spacing: 0) {
                 // search bar
-                SearchBar(text: $searchText, placeholder: "Search songs...")
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                if !AppDesign.isNativeGlass {
+                    SearchBar(text: $searchText, placeholder: "Search songs...")
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
                 
                 List {
                     ForEach(filteredSongs, id: \.persistentID) { song in
@@ -461,6 +463,7 @@ struct AddSongsToPlaylistView: View {
                 .listStyle(.plain)
             }
             .navigationTitle("Add Songs")
+            .adaptiveSearchable(text: $searchText, prompt: "Search songs")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {

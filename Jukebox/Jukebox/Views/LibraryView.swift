@@ -74,116 +74,15 @@ struct LibraryView: View {
     }
     
     var body: some View {
-        NavigationView {
-            ZStack(alignment: .top) {
-                // main scrollable content
-                VStack(spacing: 0) {
-                    // spacer for custom header area
-                    Color.clear.frame(height: 160)
-                    
-                    if musicManager.hasPermission {
-                        if musicManager.songs.isEmpty {
-                            emptyState
-                        } else {
-                            VStack(spacing: 0) {
-                                headerButtons
-                                songList
-                            }
-                        }
-                    } else {
-                        permissionDeniedState
-                    }
-                }
-                
-                // gradient blur header overlay
-                VStack(spacing: 0) {
-                    Rectangle()
-                        .fill(.clear)
-                        .frame(height: 180)
-                        .background(
-                            .ultraThinMaterial
-                        )
-                        .mask(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .black, location: 0.0),
-                                    .init(color: .black, location: 0.6),
-                                    .init(color: .black.opacity(0.7), location: 0.75),
-                                    .init(color: .black.opacity(0.3), location: 0.9),
-                                    .init(color: .clear, location: 1.0)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                    Spacer()
-                }
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-                
-                // custom header content
-                VStack(spacing: 0) {
-                    // status bar spacer
-                    Color.clear.frame(height: 50)
-                    
-                    // title row with buttons
-                    HStack(alignment: .center) {
-                        Text("Jukebox")
-                            .font(.system(size: 34, weight: .bold))
-                        
-                        Spacer()
-                        
-                        // filter menu
-                        Menu {
-                            Section("Filter By") {
-                                Menu {
-                                    Button(action: { filterType = .songName }) {
-                                        Label("Song Name", systemImage: "music.note")
-                                    }
-                                    Button(action: { filterType = .albumName }) {
-                                        Label("Album Name", systemImage: "square.stack")
-                                    }
-                                    Button(action: { filterType = .artistName }) {
-                                        Label("Artist Name", systemImage: "person")
-                                    }
-                                } label: {
-                                    Label("Name", systemImage: "textformat")
-                                }
-                                Button(action: { filterType = .dateAdded }) {
-                                    Label("Date Added", systemImage: "calendar")
-                                }
-                            }
-                            
-                            Section("Sort By") {
-                                Button(action: { sortOrder = .ascending }) {
-                                    Label("Ascending", systemImage: "arrow.up")
-                                }
-                                Button(action: { sortOrder = .descending }) {
-                                    Label("Descending", systemImage: "arrow.down")
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "line.3.horizontal.decrease.circle")
-                                .font(.system(size: 22))
-                                .foregroundColor(.primary)
-                        }
-                        
-                        // settings button
-                        Button(action: { showSettings = true }) {
-                            Image(systemName: "gearshape.fill")
-                                .font(.system(size: 22))
-                                .foregroundColor(.primary)
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 8)
-                    
-                    // search bar
-                    SearchBar(text: $searchText, placeholder: "Search songs, artists, albums")
-                        .padding(.horizontal, 20)
+        NavigationStack {
+            Group {
+                if AppDesign.isNativeGlass {
+                    nativeLayout
+                } else {
+                    amityLayout
                 }
             }
-            .navigationBarHidden(true)
+            .toolbar(AppDesign.isNativeGlass ? .automatic : .hidden, for: .navigationBar)
             .onAppear(perform: refreshDisplayedSongs)
             .onChange(of: musicManager.libraryVersion) { _ in refreshDisplayedSongs() }
             .onChange(of: searchText) { _ in refreshDisplayedSongs() }
@@ -212,6 +111,150 @@ struct LibraryView: View {
         }
     }
     
+    // MARK: - Layouts
+
+    /// Native Glass: system large title, toolbar buttons and search field
+    private var nativeLayout: some View {
+        libraryContent
+            .navigationTitle("Jukebox")
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    filterMenu
+                    Button(action: { showSettings = true }) {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("Settings")
+                }
+            }
+            .adaptiveSearchable(text: $searchText, prompt: "Search songs, artists, albums")
+    }
+
+    /// Amity 1.0: custom header with blur and the custom search bar
+    private var amityLayout: some View {
+        ZStack(alignment: .top) {
+            // main scrollable content
+            VStack(spacing: 0) {
+                // spacer for custom header area
+                Color.clear.frame(height: 160)
+                
+                libraryContent
+            }
+            
+            // gradient blur header overlay
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(.clear)
+                    .frame(height: 180)
+                    .background(
+                        .ultraThinMaterial
+                    )
+                    .mask(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .black, location: 0.0),
+                                .init(color: .black, location: 0.6),
+                                .init(color: .black.opacity(0.7), location: 0.75),
+                                .init(color: .black.opacity(0.3), location: 0.9),
+                                .init(color: .clear, location: 1.0)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                Spacer()
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            
+            // custom header content
+            VStack(spacing: 0) {
+                // status bar spacer
+                Color.clear.frame(height: 50)
+                
+                // title row with buttons
+                HStack(alignment: .center) {
+                    Text("Jukebox")
+                        .font(.system(size: 34, weight: .bold))
+                    
+                    Spacer()
+                    
+                    // filter menu
+                    filterMenu
+                    
+                    // settings button
+                    Button(action: { showSettings = true }) {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(.primary)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
+                
+                // search bar
+                if !AppDesign.isNativeGlass {
+                    SearchBar(text: $searchText, placeholder: "Search songs, artists, albums")
+                        .padding(.horizontal, 20)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var libraryContent: some View {
+        if musicManager.hasPermission {
+            if musicManager.songs.isEmpty {
+                emptyState
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VStack(spacing: 0) {
+                    headerButtons
+                    songList
+                }
+            }
+        } else {
+            permissionDeniedState
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var filterMenu: some View {
+            Menu {
+                Section("Filter By") {
+                    Menu {
+                        Button(action: { filterType = .songName }) {
+                            Label("Song Name", systemImage: "music.note")
+                        }
+                        Button(action: { filterType = .albumName }) {
+                            Label("Album Name", systemImage: "square.stack")
+                        }
+                        Button(action: { filterType = .artistName }) {
+                            Label("Artist Name", systemImage: "person")
+                        }
+                    } label: {
+                        Label("Name", systemImage: "textformat")
+                    }
+                    Button(action: { filterType = .dateAdded }) {
+                        Label("Date Added", systemImage: "calendar")
+                    }
+                }
+                
+                Section("Sort By") {
+                    Button(action: { sortOrder = .ascending }) {
+                        Label("Ascending", systemImage: "arrow.up")
+                    }
+                    Button(action: { sortOrder = .descending }) {
+                        Label("Descending", systemImage: "arrow.down")
+                    }
+                }
+            } label: {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 22))
+                    .foregroundColor(.primary)
+            }
+            
+    }
+
     private var addToPlaylistSheet: some View {
         Group {
             if let song = selectedSongForPlaylist {
@@ -286,7 +329,7 @@ struct LibraryView: View {
             
             // bottom spacer for tab bar + mini player
             Color.clear
-                .frame(height: 140)
+                .frame(height: AppDesign.legacyBottomSpace(140))
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)

@@ -24,6 +24,12 @@ struct SettingsView: View {
     
     // appearance
     @AppStorage("appTheme") private var appTheme = 0 // 0 = system, 1 = light, 2 = dark
+    @AppStorage(AppDesign.storageKey) private var designLanguage: String = DesignLanguage.defaultValue.rawValue
+    
+    /// the design picked in settings (may differ from the one running until restart)
+    private var selectedDesign: DesignLanguage {
+        DesignLanguage(rawValue: designLanguage) ?? DesignLanguage.defaultValue
+    }
     
     // computed color scheme for this view
     private var colorScheme: ColorScheme? {
@@ -86,6 +92,8 @@ struct SettingsView: View {
                     } label: {
                         Text("Theme")
                     }
+                    
+                    designLanguageRow
                 }
                 
                 Section("About") {
@@ -128,6 +136,34 @@ struct SettingsView: View {
         let version = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
         return "\(version) (\(build))"
+    }
+    
+    // MARK: - design language
+    
+    @ViewBuilder
+    private var designLanguageRow: some View {
+        if DesignLanguage.isNativeGlassSupported {
+            Picker("Design Language", selection: $designLanguage) {
+                ForEach(DesignLanguage.allCases) { design in
+                    Text(design.displayName).tag(design.rawValue)
+                }
+            }
+            
+            if selectedDesign != AppDesign.current {
+                Label("Close and reopen Jukebox to switch to \(selectedDesign.displayName).", systemImage: "arrow.clockwise")
+                    .font(.footnote)
+                    .foregroundColor(.orange)
+            }
+        } else {
+            HStack {
+                Text("Design Language")
+                Spacer()
+                Text(DesignLanguage.amity.displayName).foregroundColor(.secondary)
+            }
+            Text("Native Glass needs iOS 26 or later.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        }
     }
     
     // MARK: - logged in view
