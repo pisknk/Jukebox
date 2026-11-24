@@ -15,6 +15,8 @@ import Foundation
 import MediaPlayer
 import Combine
 import UIKit
+import CoreImage
+import CoreImage.CIFilterBuiltins
 
 final class MotionArtworkManager: ObservableObject {
     static let shared = MotionArtworkManager()
@@ -24,6 +26,15 @@ final class MotionArtworkManager: ObservableObject {
 
     /// the 3:4 motion cover video for the song that's playing, once it's ready
     @Published private(set) var currentVideo: URL?
+    /// the video's first frame: shown under the video until it can play (no black flash)
+    @Published private(set) var currentPoster: UIImage?
+    /// the colour along the cover's bottom edge, darkened for white text: the background below it
+    @Published private(set) var currentEdgeColor: UIColor?
+
+    /// poster + edge colour per video file
+    private var looks: [String: (poster: UIImage, edge: UIColor)] = [:]
+    private var wantedVideo: URL?
+    private static let ciContext = CIContext(options: [.cacheIntermediates: false])
 
     private enum Entry {
         case ready(fileName: String)        // a video in Caches/Jukebox/motion
@@ -223,10 +234,69 @@ final class MotionArtworkManager: ObservableObject {
         print("[Jukebox motion] no animated cover for \(key): \(note)")
     }
 
+    /// publishes the video together with its poster and edge colour, so the full-width
+    /// cover only appears once it can be shown properly
     private func setCurrentVideo(_ url: URL?) {
-        if currentVideo != url {
-            currentVideo = url
+        wantedVideo = url
+        guard let url = url else {
+            if currentVideo != nil { currentVideo = nil }
+            currentPoster = nil
+            currentEdgeColor = nil
+            return
         }
+        if currentVideo == url { return }
+
+        let name = url.lastPathComponent
+        if let look = looks[name] {
+            publish(url, look: look)
+            return
+        }
+        JBMotionPreview(url, CGSize(width: 900, height: 1200)) { [weak self] image in
+            let poster = image
+            let edge = poster.map(Self.bottomEdgeColor) ?? UIColor(white: 0.12, alpha: 1)
+            DispatchQueue.main.async {
+                guard let self = self, let poster = poster else { return }
+                let look = (poster: poster, edge: edge)
+                self.looks[name] = look
+                // the song may have changed while the frame was read
+                if self.wantedVideo == url {
+                    self.publish(url, look: look)
+                }
+            }
+        }
+    }
+
+    private func publish(_ url: URL, look: (poster: UIImage, edge: UIColor)) {
+        currentPoster = look.poster
+        currentEdgeColor = look.edge
+        currentVideo = url
+    }
+
+    /// average colour of the bottom tenth of the frame, darkened so white text stays readable
+    private static func bottomEdgeColor(of image: UIImage) -> UIColor {
+        guard let cgImage = image.cgImage else { return UIColor(white: 0.12, alpha: 1) }
+        let input = CIImage(cgImage: cgImage)
+        let extent = input.extent
+        // Core Image's origin is bottom-left, so the bottom strip starts at y = 0
+        let strip = CGRect(x: extent.minX, y: extent.minY, width: extent.width, height: max(1, extent.height * 0.1))
+
+        let filter = CIFilter.areaAverage()
+        filter.inputImage = input
+        filter.extent = strip
+        guard let output = filter.outputImage else { return UIColor(white: 0.12, alpha: 1) }
+
+        var pixel = [Float](repeating: 0, count: 4)
+        ciContext.render(output,
+                         toBitmap: &pixel,
+                         rowBytes: 4 * MemoryLayout<Float>.size,
+                         bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+                         format: .RGBAf,
+                         colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+
+        let average = UIColor(red: CGFloat(pixel[0]), green: CGFloat(pixel[1]), blue: CGFloat(pixel[2]), alpha: 1)
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+        average.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        return UIColor(hue: hue, saturation: saturation, brightness: min(brightness, 0.4), alpha: 1)
     }
 
     private func saveReady() {

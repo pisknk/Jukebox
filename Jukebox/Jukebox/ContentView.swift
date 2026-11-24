@@ -312,30 +312,27 @@ struct NowPlayingModalView: View {
                 // solid black background
                 Color.black
                 
-                // gradient background from album artwork with fade transition
-                nowPlayingBackground
-                    .opacity(gradientOpacity)
-                
-                // animated album cover across the top, fading into the background
                 if let video = fullBleedVideo {
+                    // the cover's own bottom-edge colour continues down the screen
+                    fullBleedBackground
+                        .transition(.opacity)
+                    
+                    // animated album cover across the top, fading into that colour
                     VStack(spacing: 0) {
-                        LoopingVideoView(url: video, isPlaying: musicManager.isPlaying)
-                            .frame(width: geometry.size.width, height: geometry.size.width * 4 / 3)
-                            .clipped()
-                            .mask(
-                                LinearGradient(
-                                    stops: [
-                                        .init(color: .black, location: 0),
-                                        .init(color: .black, location: 0.68),
-                                        .init(color: .clear, location: 1)
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
+                        FullBleedMotionCover(
+                            video: video,
+                            poster: motion.currentPoster ?? musicManager.currentArtwork,
+                            isPlaying: musicManager.isPlaying
+                        )
+                        .frame(width: geometry.size.width, height: fullBleedCoverHeight(in: geometry))
+                        .id(video)
                         Spacer(minLength: 0)
                     }
                     .transition(.opacity)
+                } else {
+                    // gradient background from album artwork with fade transition
+                    nowPlayingBackground
+                        .opacity(gradientOpacity)
                 }
                 
                 VStack(spacing: 0) {
@@ -472,6 +469,7 @@ struct NowPlayingModalView: View {
                     .padding(.horizontal, 30)
                     .scaleEffect(musicManager.isPlaying ? 1 : 0.95)
                     .animation(.spring(), value: musicManager.isPlaying)
+                    .transition(.scale(scale: 1.18).combined(with: .opacity))
             } else {
                 placeholderArtwork
             }
@@ -575,6 +573,21 @@ struct NowPlayingModalView: View {
         .padding(.top, 24)
         .padding(.bottom, 40)
         
+        // system volume, like the Music app (fills the space under the full-width cover)
+        if fullBleedVideo != nil {
+            HStack(spacing: 12) {
+                Image(systemName: "speaker.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.6))
+                SystemVolumeSlider()
+                    .frame(height: 34)
+                Image(systemName: "speaker.wave.3.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            .padding(.horizontal, 30)
+        }
+        
         Spacer()
         
         // bottom controls
@@ -613,9 +626,22 @@ struct NowPlayingModalView: View {
     /// where the song info starts under a full-width animated cover: over the cover's faded
     /// bottom, but never so low that the controls run off a small screen
     private func fullBleedInfoOffset(in geometry: GeometryProxy) -> CGFloat {
-        let coverHeight = geometry.size.width * 4 / 3
-        let fitsControls = geometry.size.height - 470
-        return max(60, min(coverHeight - 140, fitsControls))
+        let coverOverlap = fullBleedCoverHeight(in: geometry) * 0.8
+        let fitsControls = geometry.size.height - 450
+        return max(60, min(coverOverlap, fitsControls))
+    }
+    
+    /// the full-width cover takes the top 68% of the screen (as in twenty-one-reborn)
+    private func fullBleedCoverHeight(in geometry: GeometryProxy) -> CGFloat {
+        geometry.size.height * 0.68
+    }
+    
+    /// solid cover-edge colour, a little darker towards the bottom
+    private var fullBleedBackground: some View {
+        Color(uiColor: motion.currentEdgeColor ?? UIColor(white: 0.12, alpha: 1))
+            .overlay(
+                LinearGradient(colors: [.clear, .black.opacity(0.3)], startPoint: .top, endPoint: .bottom)
+            )
     }
     
     // MARK: - No Song View
@@ -667,6 +693,57 @@ private struct NativeGlassPlainButtons: ViewModifier {
             content
         }
     }
+}
+
+// MARK: - Full-bleed Motion Cover
+/// static -> animated: the video's first frame shows full-width right away, and the
+/// video fades in on top once it can display (as in twenty-one-reborn)
+struct FullBleedMotionCover: View {
+    let video: URL
+    let poster: UIImage?
+    let isPlaying: Bool
+
+    @State private var videoReady = false
+
+    var body: some View {
+        ZStack {
+            if let poster = poster {
+                Image(uiImage: poster)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            }
+            LoopingVideoView(url: video, isPlaying: isPlaying) {
+                withAnimation(.easeOut(duration: 0.2)) { videoReady = true }
+            }
+            .opacity(videoReady ? 1 : 0)
+        }
+        .clipped()
+        // solid down to 72%, half by 90%, gone at the bottom
+        .mask(
+            LinearGradient(
+                stops: [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: 0.72),
+                    .init(color: .black.opacity(0.5), location: 0.9),
+                    .init(color: .clear, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .allowsHitTesting(false)
+    }
+}
+
+/// the system volume slider (MPVolumeView), tinted for the dark Now Playing screen
+struct SystemVolumeSlider: UIViewRepresentable {
+    func makeUIView(context: Context) -> MPVolumeView {
+        let view = MPVolumeView(frame: .zero)
+        view.tintColor = .white
+        return view
+    }
+
+    func updateUIView(_ view: MPVolumeView, context: Context) {}
 }
 
 // MARK: - Now Playing Progress

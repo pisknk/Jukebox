@@ -13,15 +13,19 @@ struct LoopingVideoView: UIViewRepresentable {
     let url: URL
     /// follows the music: the cover only moves while a song plays
     var isPlaying: Bool
+    /// called once the first frame can be shown (so it can fade in without a black flash)
+    var onReadyForDisplay: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> LoopingPlayerView {
         let view = LoopingPlayerView()
+        view.onReadyForDisplay = onReadyForDisplay
         view.load(url)
         view.setPlaying(isPlaying)
         return view
     }
 
     func updateUIView(_ view: LoopingPlayerView, context: Context) {
+        view.onReadyForDisplay = onReadyForDisplay
         if view.url != url {
             view.load(url)
         }
@@ -36,9 +40,12 @@ struct LoopingVideoView: UIViewRepresentable {
 final class LoopingPlayerView: UIView {
     override class var layerClass: AnyClass { AVPlayerLayer.self }
 
+    var onReadyForDisplay: (() -> Void)?
+
     private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
     private let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
+    private var readyObservation: NSKeyValueObservation?
     private(set) var url: URL?
 
     override init(frame: CGRect) {
@@ -51,10 +58,19 @@ final class LoopingPlayerView: UIView {
         playerLayer.videoGravity = .resizeAspectFill
         backgroundColor = .clear
         isUserInteractionEnabled = false
+
+        readyObservation = playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
+            guard layer.isReadyForDisplay else { return }
+            DispatchQueue.main.async { self?.onReadyForDisplay?() }
+        }
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        readyObservation?.invalidate()
     }
 
     func load(_ url: URL) {
