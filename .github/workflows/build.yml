@@ -71,6 +71,8 @@ jobs:
 
   simulator-smoke-test:
     name: Simulator launch test
+    # slow (boots two simulators), so it only runs when started by hand from the Actions tab
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
