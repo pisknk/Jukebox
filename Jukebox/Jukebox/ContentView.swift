@@ -156,9 +156,14 @@ struct NativeGlassRootView: View {
 struct NativeMiniPlayer: View {
     @EnvironmentObject var musicManager: MusicPlayerManager
     @Binding var showNowPlaying: Bool
+    /// .inline when the tab bar has shrunk and the player sits beside it; .expanded above it
+    @Environment(\.tabViewBottomAccessoryPlacement) private var placement
+
+    /// the narrow spot next to the collapsed tab bar: drop the skip button so the title fits
+    private var isInline: Bool { placement == .inline }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: isInline ? 8 : 10) {
             Group {
                 if let image = musicManager.currentArtwork {
                     Image(uiImage: image)
@@ -173,7 +178,7 @@ struct NativeMiniPlayer: View {
                     }
                 }
             }
-            .frame(width: 32, height: 32)
+            .frame(width: isInline ? 28 : 32, height: isInline ? 28 : 32)
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
             VStack(alignment: .leading, spacing: 1) {
@@ -188,7 +193,7 @@ struct NativeMiniPlayer: View {
                 }
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: isInline ? 4 : 8)
 
             Button(action: { musicManager.togglePlayPause() }) {
                 Image(systemName: musicManager.isPlaying ? "pause.fill" : "play.fill")
@@ -199,16 +204,18 @@ struct NativeMiniPlayer: View {
             .buttonStyle(.plain)
             .disabled(musicManager.currentSong == nil)
 
-            Button(action: { musicManager.next() }) {
-                Image(systemName: "forward.fill")
-                    .font(.system(size: 16))
-                    .frame(width: 36, height: 36)
-                    .contentShape(Rectangle())
+            if !isInline {
+                Button(action: { musicManager.next() }) {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 16))
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(musicManager.currentSong == nil)
             }
-            .buttonStyle(.plain)
-            .disabled(musicManager.currentSong == nil)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, isInline ? 8 : 12)
         .contentShape(Rectangle())
         .onTapGesture {
             if musicManager.currentSong != nil {
