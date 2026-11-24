@@ -131,16 +131,6 @@ extension UIImage {
     }
 }
 
-// MARK: - Mesh Gradient Point
-struct MeshPoint: Equatable {
-    var position: CGPoint
-    var color: Color
-    
-    static func == (lhs: MeshPoint, rhs: MeshPoint) -> Bool {
-        lhs.position == rhs.position
-    }
-}
-
 // MARK: - Smooth Animated Mesh Gradient View
 struct MeshGradientView: View {
     let colors: [Color]
@@ -156,8 +146,9 @@ struct MeshGradientView: View {
     }
     
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1/60, paused: !isAnimating)) { timeline in
-            let time = isAnimating ? timeline.date.timeIntervalSinceReferenceDate * speed : 0
+        // 30fps is plenty for a heavily blurred background and halves the GPU work
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isAnimating)) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate * speed
             
             Canvas { context, size in
                 // draw a 3x3 grid of animated color blobs
@@ -220,10 +211,17 @@ struct MeshGradientView: View {
 // MARK: - Album Art Mesh Gradient
 struct AlbumFluidGradient: View {
     let image: UIImage?
+    /// identifies the artwork (e.g. the song's persistent id). colours are only re-extracted
+    /// when this changes, not every time the view redraws with a new UIImage instance.
+    var imageID: UInt64? = nil
     var isAnimating: Bool = true
-    
+
     @State private var extractedColors: [Color] = []
-    
+    @State private var activeID: UInt64? = nil
+
+    /// colours already worked out, keyed by imageID
+    private static var colorCache: [UInt64: [Color]] = [:]
+
     var body: some View {
         Group {
             if extractedColors.isEmpty {
@@ -233,22 +231,33 @@ struct AlbumFluidGradient: View {
             }
         }
         .ignoresSafeArea()
-        .onChange(of: image) { newImage in
-            updateColors(from: newImage)
+        .onChange(of: imageID) { _ in
+            updateColors()
         }
         .onAppear {
-            updateColors(from: image)
+            updateColors()
         }
     }
-    
-    private func updateColors(from image: UIImage?) {
-        if let img = image {
-            DispatchQueue.global(qos: .userInitiated).async {
-                let colors = img.extractDominantColors(count: 9)
-                DispatchQueue.main.async {
-                    withAnimation(.easeInOut(duration: 0.8)) {
-                        extractedColors = colors
-                    }
+
+    private func updateColors() {
+        activeID = imageID
+        if let id = imageID, let cached = Self.colorCache[id] {
+            withAnimation(.easeInOut(duration: 0.8)) { extractedColors = cached }
+            return
+        }
+        guard let img = image else { return }
+        let id = imageID
+        DispatchQueue.global(qos: .userInitiated).async {
+            let colors = img.extractDominantColors(count: 9)
+            DispatchQueue.main.async {
+                if let id = id {
+                    if Self.colorCache.count > 200 { Self.colorCache.removeAll() }
+                    Self.colorCache[id] = colors
+                }
+                // the song may have changed while we were working
+                guard id == activeID else { return }
+                withAnimation(.easeInOut(duration: 0.8)) {
+                    extractedColors = colors
                 }
             }
         }

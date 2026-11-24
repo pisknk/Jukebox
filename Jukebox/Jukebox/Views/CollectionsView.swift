@@ -11,6 +11,7 @@ import MediaPlayer
 struct CollectionsView: View {
     @EnvironmentObject var musicManager: MusicPlayerManager
     @ObservedObject var playlistManager = PlaylistManager.shared
+    @State private var recentlyAddedAlbums: [MPMediaItemCollection] = []
     
     // collection categories
     private let categories: [(name: String, icon: String, color: Color)] = [
@@ -86,7 +87,7 @@ struct CollectionsView: View {
                                         NavigationLink(destination: PlaylistDetailView(playlist: playlist)) {
                                             ZStack(alignment: .bottom) {
                                                 // cover art
-                                                if let img = playlist.getCoverImage(songs: musicManager.songs) {
+                                                if let img = playlistManager.coverImage(for: playlist, songsByID: musicManager.songsByID) {
                                                     Image(uiImage: img)
                                                         .resizable()
                                                         .aspectRatio(contentMode: .fill)
@@ -156,27 +157,20 @@ struct CollectionsView: View {
                 .padding(.top, 8)
             }
             .navigationTitle("Collections")
+            .onAppear(perform: loadRecentlyAdded)
+            .onChange(of: musicManager.libraryVersion) { _ in loadRecentlyAdded() }
         }
     }
     
-    // get recently added albums
-    private var recentlyAddedAlbums: [MPMediaItemCollection] {
-        let query = MPMediaQuery.albums()
-        query.addFilterPredicate(MPMediaPropertyPredicate(
-            value: false,
-            forProperty: MPMediaItemPropertyIsCloudItem
-        ))
-        
-        guard let collections = query.collections else { return [] }
-        
-        // sort by date added (if available) and take first 10
-        let sorted = collections.sorted { a, b in
-            let dateA = a.representativeItem?.dateAdded ?? Date.distantPast
-            let dateB = b.representativeItem?.dateAdded ?? Date.distantPast
-            return dateA > dateB
+    /// reads the whole album list, so it runs in the background and only when the library changes
+    private func loadRecentlyAdded() {
+        guard musicManager.hasPermission else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let albums = LibraryQueries.recentlyAddedAlbums(limit: 10)
+            DispatchQueue.main.async {
+                recentlyAddedAlbums = albums
+            }
         }
-        
-        return Array(sorted.prefix(10))
     }
     
     @ViewBuilder
@@ -275,6 +269,7 @@ struct PlaylistsListView: View {
     @EnvironmentObject var musicManager: MusicPlayerManager
     @State private var showCreatePlaylist = false
     @State private var searchText = ""
+    @State private var applePlaylists: [MPMediaPlaylist] = []
     
     var body: some View {
         VStack(spacing: 0) {
@@ -314,7 +309,7 @@ struct PlaylistsListView: View {
                         ForEach(filteredCustom) { playlist in
                             NavigationLink(destination: PlaylistDetailView(playlist: playlist)) {
                                 HStack(spacing: 12) {
-                                    if let img = playlist.getCoverImage(songs: musicManager.songs) {
+                                    if let img = playlistManager.coverImage(for: playlist, songsByID: musicManager.songsByID) {
                                         Image(uiImage: img)
                                             .resizable()
                                             .aspectRatio(contentMode: .fill)
@@ -345,23 +340,20 @@ struct PlaylistsListView: View {
                             }
                         }
                         .onDelete { indexSet in
-                            for index in indexSet {
-                                let playlist = filteredCustom[index]
-                                playlistManager.deletePlaylist(id: playlist.id)
-                            }
+                            let ids = indexSet.map { filteredCustom[$0].id }
+                            ids.forEach { playlistManager.deletePlaylist(id: $0) }
                         }
                     }
                 }
                 
                 // Apple Music Playlists (Read Only) - filtered
-                let allApple = MPMediaQuery.playlists().collections ?? []
-                let filteredApple = searchText.isEmpty ? allApple : allApple.filter { playlist in
-                    let name = playlist.value(forProperty: MPMediaPlaylistPropertyName) as? String ?? ""
-                    return name.localizedCaseInsensitiveContains(searchText)
+                let filteredApple = searchText.isEmpty ? applePlaylists : applePlaylists.filter { playlist in
+                    (playlist.name ?? "").localizedCaseInsensitiveContains(searchText)
                 }
                 if !filteredApple.isEmpty {
                     Section(header: Text("Apple Music Playlists")) {
                         ForEach(filteredApple, id: \.persistentID) { playlist in
+                            NavigationLink(destination: AppleMusicPlaylistView(playlist: playlist)) {
                             HStack(spacing: 12) {
                                 if let artwork = playlist.representativeItem?.artwork,
                                    let image = artwork.image(at: CGSize(width: 50, height: 50)) {
@@ -380,12 +372,13 @@ struct PlaylistsListView: View {
                                 }
                                 
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(playlist.value(forProperty: MPMediaPlaylistPropertyName) as? String ?? "Playlist")
+                                    Text(playlist.name ?? "Playlist")
                                         .font(.system(size: 16, weight: .medium))
                                     Text("\(playlist.count) songs")
                                         .font(.system(size: 14))
                                         .foregroundColor(.secondary)
                                 }
+                            }
                             }
                         }
                     }
@@ -401,6 +394,9 @@ struct PlaylistsListView: View {
             .listStyle(.grouped)
         }
         .navigationTitle("Playlists")
+        .onAppear {
+            applePlaylists = LibraryQueries.appleMusicPlaylists()
+        }
         .sheet(isPresented: $showCreatePlaylist) {
             CreatePlaylistView()
         }
@@ -410,6 +406,7 @@ struct PlaylistsListView: View {
 // MARK: - Albums List View
 struct AlbumsListView: View {
     @State private var searchText = ""
+    @State private var allAlbums: [MPMediaItemCollection] = []
     
     let columns = [
         GridItem(.flexible(), spacing: 16),
@@ -417,9 +414,6 @@ struct AlbumsListView: View {
     ]
     
     var body: some View {
-        let query = MPMediaQuery.albums()
-        let allAlbums = query.collections ?? []
-        
         // filter albums based on search
         let albums = searchText.isEmpty ? allAlbums : allAlbums.filter { album in
             let title = album.representativeItem?.albumTitle ?? ""
@@ -447,17 +441,18 @@ struct AlbumsListView: View {
                 .frame(height: 140)
         }
         .navigationTitle("Albums")
+        .onAppear {
+            if allAlbums.isEmpty { allAlbums = LibraryQueries.allAlbums() }
+        }
     }
 }
 
 // MARK: - Artists List View
 struct ArtistsListView: View {
     @State private var searchText = ""
+    @State private var allArtists: [MPMediaItemCollection] = []
     
     var body: some View {
-        let query = MPMediaQuery.artists()
-        let allArtists = query.collections ?? []
-        
         // filter artists based on search
         let artists = searchText.isEmpty ? allArtists : allArtists.filter { artist in
             let name = artist.representativeItem?.artist ?? ""
@@ -473,10 +468,7 @@ struct ArtistsListView: View {
             List {
                 ForEach(artists, id: \.persistentID) { artist in
                     let artistName = artist.representativeItem?.artist ?? "Unknown Artist"
-                    NavigationLink(destination: ArtistDetailView(
-                        artistName: artistName,
-                        artistAlbums: getAlbums(for: artistName)
-                    )) {
+                    NavigationLink(destination: ArtistDetailView(artistName: artistName)) {
                         ArtistRowView(artistName: artistName, songCount: artist.count)
                     }
                 }
@@ -491,14 +483,9 @@ struct ArtistsListView: View {
             .listStyle(.plain)
         }
         .navigationTitle("Artists")
-    }
-    
-    func getAlbums(for artist: String) -> [MPMediaItemCollection] {
-        let query = MPMediaQuery.albums()
-        let predicate = MPMediaPropertyPredicate(value: artist, forProperty: MPMediaItemPropertyArtist)
-        query.addFilterPredicate(predicate)
-        return query.collections ?? []
-    }
+        .onAppear {
+            if allArtists.isEmpty { allArtists = LibraryQueries.allArtists() }
+        }
 }
 
 // MARK: - Artist Row View
@@ -574,7 +561,6 @@ struct ArtistRowView: View {
 // MARK: - Songs List View
 struct SongsListView: View {
     @EnvironmentObject var musicManager: MusicPlayerManager
-    @State private var showAddToPlaylist = false
     @State private var selectedSong: MPMediaItem?
     @State private var searchText: String = ""
     
@@ -601,10 +587,7 @@ struct SongsListView: View {
                 Section {
                     HStack(spacing: 12) {
                         Button(action: {
-                            if let first = filteredSongs.first {
-                                musicManager.shuffleEnabled = false
-                                musicManager.play(songs: filteredSongs, startWith: first, context: "Songs")
-                            }
+                            musicManager.playInOrder(songs: filteredSongs, context: "Songs")
                         }) {
                             HStack {
                                 Image(systemName: "play.fill")
@@ -619,10 +602,7 @@ struct SongsListView: View {
                         .buttonStyle(.plain)
                         
                         Button(action: {
-                            musicManager.shuffleEnabled = true
-                            if let randomSong = filteredSongs.randomElement() {
-                                musicManager.play(songs: filteredSongs, startWith: randomSong, context: "Songs")
-                            }
+                            musicManager.playShuffled(songs: filteredSongs, context: "Songs")
                         }) {
                             HStack {
                                 Image(systemName: "shuffle")
@@ -650,8 +630,12 @@ struct SongsListView: View {
                             }
                             .contextMenu {
                                 Button(action: {
+                                    musicManager.addToQueue(song: song)
+                                }) {
+                                    Label("Add to Queue", systemImage: "text.badge.plus")
+                                }
+                                Button(action: {
                                     selectedSong = song
-                                    showAddToPlaylist = true
                                 }) {
                                     Label("Add to Playlist", systemImage: "plus.circle")
                                 }
@@ -683,7 +667,7 @@ extension MPMediaItem: @retroactive Identifiable {
 // MARK: - Favourites View
 struct FavouritesView: View {
     @EnvironmentObject var musicManager: MusicPlayerManager
-    @StateObject private var favoritesManager = FavoritesManager.shared
+    @ObservedObject private var favoritesManager = FavoritesManager.shared
     @State private var searchText = ""
     
     private var favoriteSongs: [MPMediaItem] {
@@ -720,9 +704,7 @@ struct FavouritesView: View {
             Section {
                 HStack(spacing: 12) {
                     Button(action: {
-                        if let first = favoriteSongs.first {
-                            musicManager.play(songs: favoriteSongs, startWith: first, context: "Favourites")
-                        }
+                        musicManager.playInOrder(songs: favoriteSongs, context: "Favourites")
                     }) {
                         HStack {
                             Image(systemName: "play.fill")
@@ -737,10 +719,7 @@ struct FavouritesView: View {
                     .buttonStyle(.plain)
                     
                     Button(action: {
-                        musicManager.shuffleEnabled = true
-                        if let randomSong = favoriteSongs.randomElement() {
-                            musicManager.play(songs: favoriteSongs, startWith: randomSong, context: "Favourites")
-                        }
+                        musicManager.playShuffled(songs: favoriteSongs, context: "Favourites")
                     }) {
                         HStack {
                             Image(systemName: "shuffle")
@@ -857,3 +836,86 @@ struct FavoriteSongRow: View {
     }
 }
 
+
+// MARK: - Apple Music Playlist (read only)
+struct AppleMusicPlaylistView: View {
+    let playlist: MPMediaPlaylist
+    @EnvironmentObject var musicManager: MusicPlayerManager
+    @State private var songs: [MPMediaItem] = []
+    @State private var loaded = false
+
+    private var title: String { playlist.name ?? "Playlist" }
+
+    var body: some View {
+        List {
+            if loaded && songs.isEmpty {
+                Text("None of the songs in this playlist are downloaded to this device.")
+                    .foregroundColor(.secondary)
+            } else {
+                Section {
+                    HStack(spacing: 12) {
+                        Button(action: { musicManager.playInOrder(songs: songs, context: title) }) {
+                            HStack {
+                                Image(systemName: "play.fill")
+                                Text("Play")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(Color.accentColor.opacity(0.15))
+                            .foregroundColor(.accentColor)
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(action: { musicManager.playShuffled(songs: songs, context: title) }) {
+                            HStack {
+                                Image(systemName: "shuffle")
+                                Text("Shuffle")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(Color.accentColor.opacity(0.15))
+                            .foregroundColor(.accentColor)
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+
+                Section {
+                    ForEach(Array(songs.enumerated()), id: \.offset) { _, song in
+                        SongRow(song: song)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                musicManager.play(songs: songs, startWith: song, context: title)
+                            }
+                            .contextMenu {
+                                Button {
+                                    musicManager.addToQueue(song: song)
+                                } label: {
+                                    Label("Add to Queue", systemImage: "text.badge.plus")
+                                }
+                            }
+                    }
+                }
+
+                // bottom spacer for tab bar + mini player
+                Section {
+                    Color.clear
+                        .frame(height: 100)
+                        .listRowBackground(Color.clear)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle(title)
+        .onAppear {
+            if !loaded {
+                songs = LibraryQueries.playableItems(playlist)
+                loaded = true
+            }
+        }
+    }
+}

@@ -34,39 +34,43 @@ struct LibraryView: View {
     @State private var navigateToArtist: String?
     @State private var navigateToAlbum: MPMediaItemCollection?
     
-    private var sortedAndFilteredSongs: [MPMediaItem] {
+    /// the filtered + sorted list, cached so it's only rebuilt when something it depends on changes
+    @State private var displayedSongs: [MPMediaItem] = []
+    
+    private func refreshDisplayedSongs() {
         var songs = musicManager.songs
         
         // apply search filter
-        if !searchText.isEmpty {
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        if !query.isEmpty {
             songs = songs.filter { song in
-                let titleMatch = song.title?.lowercased().contains(searchText.lowercased()) ?? false
-                let artistMatch = song.artist?.lowercased().contains(searchText.lowercased()) ?? false
-                let albumMatch = song.albumTitle?.lowercased().contains(searchText.lowercased()) ?? false
-                return titleMatch || artistMatch || albumMatch
+                (song.title?.localizedCaseInsensitiveContains(query) ?? false) ||
+                (song.artist?.localizedCaseInsensitiveContains(query) ?? false) ||
+                (song.albumTitle?.localizedCaseInsensitiveContains(query) ?? false)
             }
         }
         
-        // apply sorting
-        songs.sort { song1, song2 in
-            let result: Bool
-            switch filterType {
-            case .songName:
-                result = (song1.title ?? "").localizedCaseInsensitiveCompare(song2.title ?? "") == .orderedAscending
-            case .albumName:
-                result = (song1.albumTitle ?? "").localizedCaseInsensitiveCompare(song2.albumTitle ?? "") == .orderedAscending
-            case .artistName:
-                result = (song1.artist ?? "").localizedCaseInsensitiveCompare(song2.artist ?? "") == .orderedAscending
-            case .dateAdded:
-                // use releaseDate as fallback since dateAdded may not be available
-                let date1 = song1.value(forProperty: MPMediaItemPropertyDateAdded) as? Date ?? song1.releaseDate ?? Date.distantPast
-                let date2 = song2.value(forProperty: MPMediaItemPropertyDateAdded) as? Date ?? song2.releaseDate ?? Date.distantPast
-                result = date1 < date2
+        // apply sorting. read each sort key once up front: media item properties are slow to read
+        let ascending = sortOrder == .ascending
+        switch filterType {
+        case .dateAdded:
+            let keyed = songs.map { ($0.dateAdded, $0) }
+            songs = keyed.sorted { ascending ? $0.0 < $1.0 : $0.0 > $1.0 }.map(\.1)
+        case .songName, .albumName, .artistName:
+            let keyed: [(String, MPMediaItem)] = songs.map { song in
+                switch filterType {
+                case .albumName: return (song.albumTitle ?? "", song)
+                case .artistName: return (song.artist ?? "", song)
+                default: return (song.title ?? "", song)
+                }
             }
-            return sortOrder == .ascending ? result : !result
+            songs = keyed.sorted { a, b in
+                let result = a.0.localizedStandardCompare(b.0)
+                return ascending ? result == .orderedAscending : result == .orderedDescending
+            }.map(\.1)
         }
         
-        return songs
+        displayedSongs = songs
     }
     
     var body: some View {
@@ -180,6 +184,11 @@ struct LibraryView: View {
                 }
             }
             .navigationBarHidden(true)
+            .onAppear(perform: refreshDisplayedSongs)
+            .onChange(of: musicManager.libraryVersion) { _ in refreshDisplayedSongs() }
+            .onChange(of: searchText) { _ in refreshDisplayedSongs() }
+            .onChange(of: filterType) { _ in refreshDisplayedSongs() }
+            .onChange(of: sortOrder) { _ in refreshDisplayedSongs() }
             .sheet(isPresented: $showSettings) {
                 SettingsView()
             }
@@ -195,11 +204,8 @@ struct LibraryView: View {
             .sheet(isPresented: artistNavigationBinding) {
                 if let artist = navigateToArtist {
                     NavigationView {
-                        ArtistDetailView(
-                            artistName: artist,
-                            artistAlbums: musicManager.albums.filter { $0.representativeItem?.artist == artist }
-                        )
-                        .environmentObject(musicManager)
+                        ArtistDetailView(artistName: artist)
+                            .environmentObject(musicManager)
                     }
                 }
             }
@@ -225,9 +231,7 @@ struct LibraryView: View {
     private var headerButtons: some View {
         HStack(spacing: 12) {
             Button(action: {
-                if let firstSong = sortedAndFilteredSongs.first {
-                    musicManager.play(song: firstSong)
-                }
+                musicManager.playInOrder(songs: displayedSongs, context: "Jukebox")
             }) {
                 HStack {
                     Image(systemName: "play.fill")
@@ -244,13 +248,7 @@ struct LibraryView: View {
             .buttonStyle(.plain)
             
             Button(action: {
-                // enable shuffle mode and play
-                if !musicManager.shuffleEnabled {
-                    musicManager.toggleShuffle()
-                }
-                if let randomSong = sortedAndFilteredSongs.randomElement() {
-                    musicManager.play(song: randomSong)
-                }
+                musicManager.playShuffled(songs: displayedSongs, context: "Jukebox")
             }) {
                 HStack {
                     Image(systemName: "shuffle")
@@ -273,11 +271,12 @@ struct LibraryView: View {
     
     private var songList: some View {
         List {
-            ForEach(sortedAndFilteredSongs, id: \.persistentID) { song in
+            ForEach(displayedSongs, id: \.persistentID) { song in
                 SongRow(song: song)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        musicManager.play(song: song)
+                        // the rest of the queue follows the list as you see it
+                        musicManager.play(songs: displayedSongs, startWith: song, context: "Jukebox")
                     }
                     .contextMenu {
                         songContextMenu(for: song)
@@ -327,24 +326,10 @@ struct LibraryView: View {
                 Label("Go to \(albumTitle)", systemImage: "square.stack")
             }
         }
-        
-        Divider()
-        
-        Button(role: .destructive) {
-            // note: iOS doesn't allow deleting songs from library via API
-            // this is a placeholder that shows unavailable
-        } label: {
-            Label("Delete from Library", systemImage: "trash")
-        }
-        .disabled(true)
     }
     
     private func findAlbum(for song: MPMediaItem) -> MPMediaItemCollection? {
-        guard let albumTitle = song.albumTitle else { return nil }
-        return musicManager.albums.first(where: {
-            $0.representativeItem?.albumTitle == albumTitle &&
-            $0.representativeItem?.albumArtist == song.albumArtist
-        })
+        LibraryQueries.album(containing: song)
     }
     
     private var emptyState: some View {

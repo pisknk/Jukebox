@@ -100,28 +100,36 @@ struct QueueView: View {
                 
                 // queue list with reordering
                 List {
-                    ForEach(Array(upcomingSongs.enumerated()), id: \.element.persistentID) { index, song in
-                        QueueSongRow(song: song, index: index)
+                    // each queue slot has its own id, so the same song can be queued twice
+                    ForEach(Array(musicManager.upcomingEntries.enumerated()), id: \.element.id) { offset, entry in
+                        QueueSongRow(song: entry.item)
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
                             .listRowSeparator(.hidden)
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                // play this song from the queue
-                                playQueueSongAtIndex(index)
+                                musicManager.playUpcoming(at: offset)
                             }
                     }
-                    .onMove(perform: moveItems)
-                    .onDelete(perform: deleteItems)
+                    .onMove { source, destination in
+                        musicManager.moveUpcoming(from: source, to: destination)
+                    }
+                    .onDelete { offsets in
+                        musicManager.removeUpcoming(at: offsets)
+                    }
                     
                     // "Continue Playing" / Autoplay indicator
                     if musicManager.autoplayEnabled {
                         Section {
-                            ForEach(Array(musicManager.autoplayQueue.enumerated()), id: \.element.persistentID) { index, song in
-                                QueueSongRow(song: song, index: index)
+                            ForEach(Array(musicManager.autoplayQueue.enumerated()), id: \.element.id) { offset, entry in
+                                QueueSongRow(song: entry.item)
                                     .listRowBackground(Color.clear)
                                     .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
                                     .listRowSeparator(.hidden)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        musicManager.playFromAutoplayQueue(at: offset)
+                                    }
                             }
                         } header: {
                             HStack {
@@ -148,45 +156,11 @@ struct QueueView: View {
         .preferredColorScheme(.dark)
     }
     
-    // get ALL songs after current
-    private var upcomingSongs: [MPMediaItem] {
-        guard let currentIndex = musicManager.currentIndex,
-              !musicManager.currentPlaylist.isEmpty else {
-            return []
-        }
-        
-        let startIndex = currentIndex + 1
-        if startIndex < musicManager.currentPlaylist.count {
-            return Array(musicManager.currentPlaylist[startIndex...])
-        }
-        return []
-    }
-    
-    private func moveItems(from source: IndexSet, to destination: Int) {
-        musicManager.moveQueueItem(from: source, to: destination)
-    }
-    
-    private func deleteItems(at offsets: IndexSet) {
-        // calculate actual indices in playlist
-        guard let currentIndex = musicManager.currentIndex else { return }
-        let actualIndices = offsets.map { $0 + currentIndex + 1 }
-        for index in actualIndices.sorted().reversed() {
-            musicManager.removeFromQueue(at: index)
-        }
-    }
-    
-    private func playQueueSongAtIndex(_ queueIndex: Int) {
-        // calculate actual index in playlist (queueIndex is offset from current)
-        guard let currentIndex = musicManager.currentIndex else { return }
-        let actualIndex = currentIndex + 1 + queueIndex
-        musicManager.playFromQueueAtIndex(actualIndex)
-    }
 }
 
 // MARK: - Queue Song Row
 struct QueueSongRow: View {
     let song: MPMediaItem
-    let index: Int
     
     var body: some View {
         HStack(spacing: 12) {

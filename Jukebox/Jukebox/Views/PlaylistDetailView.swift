@@ -21,9 +21,20 @@ struct PlaylistDetailView: View {
     @State private var showAddSongs = false
     @State private var showImagePicker = false
     @State private var selectedImage: UIImage?
+    @State private var artistToShow: String?
+    @State private var albumToShow: MPMediaItemCollection?
+    
+    /// songs on this device, each with its position in the saved playlist
+    private var rows: [PlaylistRow] {
+        playlistManager.rows(for: playlist.id, songsByID: musicManager.songsByID)
+    }
     
     private var songs: [MPMediaItem] {
-        playlist.getSongs(from: musicManager.songs)
+        rows.map(\.song)
+    }
+    
+    private var title: String {
+        currentPlaylist?.name ?? playlist.name
     }
     
     // get current playlist from manager (may be updated)
@@ -38,7 +49,7 @@ struct PlaylistDetailView: View {
                 VStack(spacing: 20) {
                     // playlist artwork
                     ZStack {
-                        if let img = selectedImage ?? currentPlaylist?.getCoverImage(songs: musicManager.songs) {
+                        if let img = selectedImage ?? currentPlaylist.flatMap({ playlistManager.coverImage(for: $0, songsByID: musicManager.songsByID) }) {
                             Image(uiImage: img)
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
@@ -115,10 +126,7 @@ struct PlaylistDetailView: View {
                     if !songs.isEmpty {
                         HStack(spacing: 16) {
                             Button(action: {
-                                if let first = songs.first {
-                                    let title = currentPlaylist?.name ?? playlist.name
-                                    musicManager.play(songs: songs, startWith: first, context: title)
-                                }
+                                musicManager.playInOrder(songs: songs, context: title)
                             }) {
                                 HStack {
                                     Image(systemName: "play.fill")
@@ -134,13 +142,7 @@ struct PlaylistDetailView: View {
                             .buttonStyle(.plain)
                             
                             Button(action: {
-                                if !musicManager.shuffleEnabled {
-                                    musicManager.toggleShuffle()
-                                }
-                                if let random = songs.randomElement() {
-                                    let title = currentPlaylist?.name ?? playlist.name
-                                    musicManager.play(songs: songs, startWith: random, context: title)
-                                }
+                                musicManager.playShuffled(songs: songs, context: title)
                             }) {
                                 HStack {
                                     Image(systemName: "shuffle")
@@ -215,7 +217,8 @@ struct PlaylistDetailView: View {
                     .padding(.vertical, 40)
                     .listRowSeparator(.hidden)
                 } else {
-                    ForEach(Array(songs.enumerated()), id: \.element.persistentID) { index, song in
+                    ForEach(rows) { row in
+                        let song = row.song
                         HStack(spacing: 12) {
                             // artwork
                             if let artwork = song.artwork,
@@ -249,7 +252,6 @@ struct PlaylistDetailView: View {
                         .contentShape(Rectangle())
                         .onTapGesture {
                             if !isEditing {
-                                let title = currentPlaylist?.name ?? playlist.name
                                 musicManager.play(songs: songs, startWith: song, context: title)
                             }
                         }
@@ -261,37 +263,37 @@ struct PlaylistDetailView: View {
                             }
                             
                             if let artist = song.artist {
-                                // TODO: Navigate to artist
-                                Button(action: {}) {
+                                Button {
+                                    artistToShow = artist
+                                } label: {
                                     Label("Go to \(artist)", systemImage: "person.fill")
                                 }
-                                .disabled(true)
                             }
                             
                             if let album = song.albumTitle {
-                                // TODO: Navigate to album
-                                Button(action: {}) {
+                                Button {
+                                    albumToShow = LibraryQueries.album(containing: song)
+                                } label: {
                                     Label("Go to \(album)", systemImage: "square.stack")
                                 }
-                                .disabled(true)
                             }
                             
                             Divider()
                             
                             Button(role: .destructive) {
-                                playlistManager.removeSong(from: playlist.id, at: index)
+                                playlistManager.removeSongs(from: playlist.id, storedIndices: IndexSet(integer: row.storedIndex))
                             } label: {
                                 Label("Remove from Playlist", systemImage: "trash")
                             }
                         }
                     }
-                    .onDelete { indexSet in
-                        for index in indexSet {
-                            playlistManager.removeSong(from: playlist.id, at: index)
-                        }
+                    .onDelete { offsets in
+                        // offsets are positions on screen; translate to the saved list
+                        let stored = PlaylistOrdering.storedOffsets(forVisible: offsets, visibleIndices: rows.map(\.storedIndex))
+                        playlistManager.removeSongs(from: playlist.id, storedIndices: stored)
                     }
                     .onMove { source, destination in
-                        playlistManager.moveSong(in: playlist.id, from: source, to: destination)
+                        playlistManager.moveVisibleSongs(in: playlist.id, rows: rows, from: source, to: destination)
                     }
                 }
             }
@@ -311,14 +313,12 @@ struct PlaylistDetailView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(isEditing ? "Done" : "Edit") {
                     if isEditing {
-                        // save name
-                        if !editedName.isEmpty {
-                            playlistManager.renamePlaylist(id: playlist.id, name: editedName)
-                        }
+                        // save name (ignored if blank)
+                        playlistManager.renamePlaylist(id: playlist.id, name: editedName)
                         // save cover image
                         if let image = selectedImage {
-                            let imageData = image.jpegData(compressionQuality: 0.8)
-                            playlistManager.setCoverImage(imageData, for: playlist.id)
+                            playlistManager.setCoverImage(image, for: playlist.id)
+                            selectedImage = nil
                         }
                     } else {
                         editedName = currentPlaylist?.name ?? playlist.name
@@ -360,6 +360,23 @@ struct PlaylistDetailView: View {
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(image: $selectedImage)
         }
+        .sheet(item: $albumToShow) { album in
+            NavigationView {
+                AlbumDetailView(album: album)
+                    .environmentObject(musicManager)
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { artistToShow != nil },
+            set: { if !$0 { artistToShow = nil } }
+        )) {
+            if let artist = artistToShow {
+                NavigationView {
+                    ArtistDetailView(artistName: artist)
+                        .environmentObject(musicManager)
+                }
+            }
+        }
     }
 }
 
@@ -378,7 +395,7 @@ struct AddSongsToPlaylistView: View {
     }
     
     private var filteredSongs: [MPMediaItem] {
-        let existing = currentPlaylist?.songPersistentIDs ?? []
+        let existing = Set(currentPlaylist?.songPersistentIDs ?? [])
         let available = musicManager.songs.filter { !existing.contains($0.persistentID) }
         
         if searchText.isEmpty { return available }
@@ -452,9 +469,11 @@ struct AddSongsToPlaylistView: View {
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Add (\(selectedSongs.count))") {
-                        for songID in selectedSongs {
-                            playlistManager.addSong(to: playlistID, songID: songID)
-                        }
+                        // add in library order, not the random order of a set
+                        let ordered = musicManager.songs
+                            .map(\.persistentID)
+                            .filter { selectedSongs.contains($0) }
+                        playlistManager.addSongs(to: playlistID, songIDs: ordered)
                         dismiss()
                     }
                     .fontWeight(.semibold)

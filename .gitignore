@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Xcode per-user state
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+# crash / hang reports
+*.ips
+
+# local secrets (see Jukebox/Config/Secrets.example.xcconfig)
+Jukebox/Config/Secrets.xcconfig
+
+# test binaries
+logic-tests

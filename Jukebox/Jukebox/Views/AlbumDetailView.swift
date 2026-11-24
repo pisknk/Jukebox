@@ -13,6 +13,22 @@ struct AlbumDetailView: View {
     @EnvironmentObject var musicManager: MusicPlayerManager
     @Environment(\.dismiss) var dismiss
     @State private var shadowColor: Color = .black.opacity(0.3)
+    @State private var songForPlaylist: MPMediaItem?
+
+    private var albumTitle: String {
+        album.representativeItem?.albumTitle ?? "Album"
+    }
+
+    /// release year, if the album has one
+    private var releaseYear: Int? {
+        if let date = album.representativeItem?.releaseDate {
+            return Calendar.current.component(.year, from: date)
+        }
+        if let year = album.representativeItem?.value(forProperty: "year") as? Int, year > 0 {
+            return year
+        }
+        return nil
+    }
     
     var body: some View {
         ScrollView {
@@ -60,7 +76,7 @@ struct AlbumDetailView: View {
                         .font(.system(size: 18))
                         .foregroundColor(.pink)
                     
-                    if let year = album.representativeItem?.value(forProperty: "year") as? Int, year > 0 {
+                    if let year = releaseYear {
                         Text(String(year))
                             .font(.system(size: 15))
                             .foregroundColor(.secondary)
@@ -71,10 +87,7 @@ struct AlbumDetailView: View {
                 // play / shuffle buttons
                 HStack(spacing: 16) {
                     Button(action: {
-                        if let first = album.items.first {
-                            let title = album.representativeItem?.albumTitle ?? "Album"
-                            musicManager.play(songs: album.items, startWith: first, context: title)
-                        }
+                        musicManager.playInOrder(songs: album.items, context: albumTitle)
                     }) {
                         HStack {
                             Image(systemName: "play.fill")
@@ -89,13 +102,7 @@ struct AlbumDetailView: View {
                     }
                     
                     Button(action: {
-                        if !musicManager.shuffleEnabled {
-                            musicManager.toggleShuffle()
-                        }
-                        if let random = album.items.randomElement() {
-                            let title = album.representativeItem?.albumTitle ?? "Album"
-                            musicManager.play(songs: album.items, startWith: random, context: title)
-                        }
+                        musicManager.playShuffled(songs: album.items, context: albumTitle)
                     }) {
                         HStack {
                             Image(systemName: "shuffle")
@@ -114,35 +121,49 @@ struct AlbumDetailView: View {
                 // track list
                 VStack(spacing: 0) {
                     ForEach(Array(album.items.enumerated()), id: \.element.persistentID) { index, song in
-                        Button(action: {
-                            let title = album.representativeItem?.albumTitle ?? "Album"
-                            musicManager.play(songs: album.items, startWith: song, context: title)
-                        }) {
-                            HStack(spacing: 16) {
-                                Text("\(index + 1)")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.secondary)
-                                    .frame(width: 24)
-                                
-                                Text(song.title ?? "Unknown")
-                                    .font(.system(size: 17))
-                                    .foregroundColor(.primary)
-                                    .lineLimit(1)
-                                
-                                Spacer()
-                                
-                                Button(action: {
-                                    // show add to playlist or menu
-                                }) {
-                                    Image(systemName: "ellipsis")
+                        HStack(spacing: 0) {
+                            Button(action: {
+                                musicManager.play(songs: album.items, startWith: song, context: albumTitle)
+                            }) {
+                                HStack(spacing: 16) {
+                                    Text("\(index + 1)")
                                         .font(.system(size: 16))
                                         .foregroundColor(.secondary)
+                                        .frame(width: 24)
+                                    
+                                    Text(song.title ?? "Unknown")
+                                        .font(.system(size: 17))
+                                        .foregroundColor(song.assetURL == nil ? .secondary : .primary)
+                                        .lineLimit(1)
+                                    
+                                    Spacer()
                                 }
+                                .padding(.vertical, 14)
+                                .padding(.leading, 20)
+                                .contentShape(Rectangle())
                             }
-                            .padding(.vertical, 14)
-                            .padding(.horizontal, 20)
+                            .buttonStyle(.plain)
+                            
+                            Menu {
+                                Button {
+                                    musicManager.addToQueue(song: song)
+                                } label: {
+                                    Label("Add to Queue", systemImage: "text.badge.plus")
+                                }
+                                Button {
+                                    songForPlaylist = song
+                                } label: {
+                                    Label("Add to Playlist", systemImage: "music.note.list")
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .padding(.trailing, 8)
                         }
-                        .buttonStyle(.plain)
                         
                         if index < album.items.count - 1 {
                             Divider()
@@ -156,5 +177,8 @@ struct AlbumDetailView: View {
             .padding(.top, 20)
         }
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $songForPlaylist) { song in
+            AddToPlaylistView(song: song)
+        }
     }
 }

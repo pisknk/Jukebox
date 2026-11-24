@@ -12,8 +12,6 @@
 		2B1A1A1E2C1A1A1A2C1A1A1C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2B1A1A1D2C1A1A1A2C1A1A1B /* Assets.xcassets */; };
 		2B1A1A222C1A1A1A2C1A1A1E /* MusicPlayerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1A1A212C1A1A1A2C1A1A1D /* MusicPlayerManager.swift */; };
 		2B1A1A242C1A1A1A2C1A1A1F /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1A1A232C1A1A1A2C1A1A1E /* LibraryView.swift */; };
-		2B1A1A262C1A1A1A2C1A1A20 /* NowPlayingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1A1A252C1A1A1A2C1A1A1F /* NowPlayingView.swift */; };
-		2B1A1A282C1A1A1A2C1A1A21 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1A1A272C1A1A1A2C1A1A20 /* SearchView.swift */; };
 		2B1A1A2B2C1A1A1A2C1A1A24 /* FluidGradientView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1A1A2C2C1A1A1A2C1A1A25 /* FluidGradientView.swift */; };
 		2B1A1A2D2C1A1A1A2C1A1A26 /* QueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1A1A2E2C1A1A1A2C1A1A27 /* QueueView.swift */; };
 		2B1A1A302C1A1A1A2C1A1A28 /* CollectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1A1A2F2C1A1A1A2C1A1A29 /* CollectionsView.swift */; };
@@ -31,7 +29,12 @@
 		2B1A1A482C1A1A482C1A1A48 /* AirPlayButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1A1A492C1A1A482C1A1A49 /* AirPlayButton.swift */; };
 		2B1A1A502C1A1A502C1A1A50 /* SleepTimerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1A1A512C1A1A502C1A1A51 /* SleepTimerManager.swift */; };
 		87C33F172EF314DE00F53354 /* SearchBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87C33F162EF314DE00F53354 /* SearchBar.swift */; };
-		87C33F192EF31F5200F53354 /* BeatDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87C33F182EF31F5200F53354 /* BeatDetector.swift */; };
+		4A0B0C0D0000000000000002 /* PlaybackLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0B0C0D0000000000000001 /* PlaybackLogic.swift */; };
+		4A0B0C0D0000000000000004 /* LRCParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0B0C0D0000000000000003 /* LRCParser.swift */; };
+		4A0B0C0D0000000000000006 /* WebEncoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0B0C0D0000000000000005 /* WebEncoding.swift */; };
+		4A0B0C0D0000000000000009 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0B0C0D0000000000000008 /* KeychainStore.swift */; };
+		4A0B0C0D000000000000000B /* LibraryQueries.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0B0C0D000000000000000A /* LibraryQueries.swift */; };
+		4A0B0C0D000000000000000D /* CustomProgressSlider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0B0C0D000000000000000C /* CustomProgressSlider.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,8 +44,6 @@
 		2B1A1A1D2C1A1A1A2C1A1A1B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		2B1A1A212C1A1A1A2C1A1A1D /* MusicPlayerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicPlayerManager.swift; sourceTree = "<group>"; };
 		2B1A1A232C1A1A1A2C1A1A1E /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
-		2B1A1A252C1A1A1A2C1A1A1F /* NowPlayingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingView.swift; sourceTree = "<group>"; };
-		2B1A1A272C1A1A1A2C1A1A20 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		2B1A1A292C1A1A1A2C1A1A22 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		2B1A1A2C2C1A1A1A2C1A1A25 /* FluidGradientView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluidGradientView.swift; sourceTree = "<group>"; };
 		2B1A1A2E2C1A1A1A2C1A1A27 /* QueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueView.swift; sourceTree = "<group>"; };
@@ -61,7 +62,13 @@
 		2B1A1A492C1A1A482C1A1A49 /* AirPlayButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirPlayButton.swift; sourceTree = "<group>"; };
 		2B1A1A512C1A1A502C1A1A51 /* SleepTimerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepTimerManager.swift; sourceTree = "<group>"; };
 		87C33F162EF314DE00F53354 /* SearchBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchBar.swift; sourceTree = "<group>"; };
-		87C33F182EF31F5200F53354 /* BeatDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatDetector.swift; sourceTree = "<group>"; };
+		4A0B0C0D0000000000000001 /* PlaybackLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackLogic.swift; sourceTree = "<group>"; };
+		4A0B0C0D0000000000000003 /* LRCParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LRCParser.swift; sourceTree = "<group>"; };
+		4A0B0C0D0000000000000005 /* WebEncoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebEncoding.swift; sourceTree = "<group>"; };
+		4A0B0C0D0000000000000008 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		4A0B0C0D000000000000000A /* LibraryQueries.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryQueries.swift; sourceTree = "<group>"; };
+		4A0B0C0D000000000000000C /* CustomProgressSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomProgressSlider.swift; sourceTree = "<group>"; };
+		4A0B0C0D000000000000000E /* Jukebox.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Jukebox.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -79,6 +86,7 @@
 			isa = PBXGroup;
 			children = (
 				2B1A1A182C1A1A1A2C1A1A18 /* Jukebox */,
+				4A0B0C0D000000000000000F /* Config */,
 				2B1A1A172C1A1A1A2C1A1A17 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -105,7 +113,10 @@
 				2B1A1A472C1A1A462C1A1A47 /* ArtistImageManager.swift */,
 				2B1A1A492C1A1A482C1A1A49 /* AirPlayButton.swift */,
 				2B1A1A512C1A1A502C1A1A51 /* SleepTimerManager.swift */,
+				4A0B0C0D000000000000000A /* LibraryQueries.swift */,
+				4A0B0C0D0000000000000008 /* KeychainStore.swift */,
 				2B1A1A2C2C1A1A1A2C1A1A25 /* FluidGradientView.swift */,
+				4A0B0C0D0000000000000007 /* Logic */,
 				2B1A1A2A2C1A1A1A2C1A1A23 /* Views */,
 				2B1A1A1D2C1A1A1A2C1A1A1B /* Assets.xcassets */,
 			);
@@ -115,12 +126,10 @@
 		2B1A1A2A2C1A1A1A2C1A1A23 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				87C33F182EF31F5200F53354 /* BeatDetector.swift */,
 				87C33F162EF314DE00F53354 /* SearchBar.swift */,
+				4A0B0C0D000000000000000C /* CustomProgressSlider.swift */,
 				2B1A1A232C1A1A1A2C1A1A1E /* LibraryView.swift */,
 				2B1A1A3E2C1A1A3D2C1A1A3E /* SettingsView.swift */,
-				2B1A1A252C1A1A1A2C1A1A1F /* NowPlayingView.swift */,
-				2B1A1A272C1A1A1A2C1A1A20 /* SearchView.swift */,
 				2B1A1A2E2C1A1A1A2C1A1A27 /* QueueView.swift */,
 				2B1A1A2F2C1A1A1A2C1A1A29 /* CollectionsView.swift */,
 				2B1A1A342C1A1A1A2C1A1A33 /* AlbumDetailView.swift */,
@@ -130,6 +139,24 @@
 				2B1A1A432C1A1A422C1A1A43 /* LyricsView.swift */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		4A0B0C0D0000000000000007 /* Logic */ = {
+			isa = PBXGroup;
+			children = (
+				4A0B0C0D0000000000000001 /* PlaybackLogic.swift */,
+				4A0B0C0D0000000000000003 /* LRCParser.swift */,
+				4A0B0C0D0000000000000005 /* WebEncoding.swift */,
+			);
+			path = Logic;
+			sourceTree = "<group>";
+		};
+		4A0B0C0D000000000000000F /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				4A0B0C0D000000000000000E /* Jukebox.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -205,15 +232,12 @@
 				2B1A1A1C2C1A1A1A2C1A1A1B /* ContentView.swift in Sources */,
 				2B1A1A222C1A1A1A2C1A1A1E /* MusicPlayerManager.swift in Sources */,
 				2B1A1A242C1A1A1A2C1A1A1F /* LibraryView.swift in Sources */,
-				2B1A1A262C1A1A1A2C1A1A20 /* NowPlayingView.swift in Sources */,
-				2B1A1A282C1A1A1A2C1A1A21 /* SearchView.swift in Sources */,
 				2B1A1A1A2C1A1A1A2C1A1A1A /* JukeboxApp.swift in Sources */,
 				2B1A1A2B2C1A1A1A2C1A1A24 /* FluidGradientView.swift in Sources */,
 				2B1A1A2D2C1A1A1A2C1A1A26 /* QueueView.swift in Sources */,
 				2B1A1A302C1A1A1A2C1A1A28 /* CollectionsView.swift in Sources */,
 				2B1A1A312C1A1A1A2C1A1A30 /* PlaylistManager.swift in Sources */,
 				2B1A1A332C1A1A1A2C1A1A32 /* AlbumDetailView.swift in Sources */,
-				87C33F192EF31F5200F53354 /* BeatDetector.swift in Sources */,
 				2B1A1A352C1A1A1A2C1A1A34 /* ArtistDetailView.swift in Sources */,
 				2B1A1A372C1A1A1A2C1A1A36 /* PlaylistDetailView.swift in Sources */,
 				2B1A1A392C1A1A1A2C1A1A38 /* CreatePlaylistView.swift in Sources */,
@@ -226,6 +250,12 @@
 				2B1A1A462C1A1A462C1A1A46 /* ArtistImageManager.swift in Sources */,
 				2B1A1A482C1A1A482C1A1A48 /* AirPlayButton.swift in Sources */,
 				2B1A1A502C1A1A502C1A1A50 /* SleepTimerManager.swift in Sources */,
+				4A0B0C0D000000000000000D /* CustomProgressSlider.swift in Sources */,
+				4A0B0C0D000000000000000B /* LibraryQueries.swift in Sources */,
+				4A0B0C0D0000000000000009 /* KeychainStore.swift in Sources */,
+				4A0B0C0D0000000000000006 /* WebEncoding.swift in Sources */,
+				4A0B0C0D0000000000000004 /* LRCParser.swift in Sources */,
+				4A0B0C0D0000000000000002 /* PlaybackLogic.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -354,6 +384,7 @@
 		};
 		2B1A1A3B2C1A1A1A2C1A1A3B /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4A0B0C0D000000000000000E /* Jukebox.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -365,19 +396,12 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Jukebox/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Jukebox;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = ph.neilbayron.Jukebox;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -389,6 +413,7 @@
 		};
 		2B1A1A3C2C1A1A1A2C1A1A3C /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4A0B0C0D000000000000000E /* Jukebox.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -399,19 +424,12 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Jukebox/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Jukebox;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = ph.neilbayron.Jukebox;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

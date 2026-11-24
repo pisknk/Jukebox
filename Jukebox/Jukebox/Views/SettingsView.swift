@@ -16,6 +16,7 @@ struct SettingsView: View {
     @State private var pass = ""
     @State private var loading = false
     @State private var error: String?
+    @State private var sleepAtTime = Date().addingTimeInterval(60 * 60)
     
     // crossfade settings
     @AppStorage("crossfadeEnabled") private var crossfadeEnabled = false
@@ -60,8 +61,6 @@ struct SettingsView: View {
                             Slider(value: $crossfadeDuration, in: 1...12, step: 1)
                         }
                     }
-                    
-                    Toggle("Sound Check", isOn: .constant(true))
                 }
                 
                 Section("Sleep Timer") {
@@ -93,7 +92,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.0.0").foregroundColor(.secondary)
+                        Text(appVersion).foregroundColor(.secondary)
                     }
                 }
             }
@@ -124,6 +123,13 @@ struct SettingsView: View {
         }
     }
     
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(version) (\(build))"
+    }
+    
     // MARK: - logged in view
     
     private var loggedInView: some View {
@@ -151,7 +157,18 @@ struct SettingsView: View {
     
     // MARK: - login form
     
+    @ViewBuilder
     private var loginFormView: some View {
+        if !lastFM.isConfigured {
+            Text("Last.fm isn't available in this build because it was built without a Last.fm API key.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        } else {
+            loginFields
+        }
+    }
+    
+    private var loginFields: some View {
         Group {
             TextField("Username", text: $user)
                 .disableAutocorrection(true)
@@ -242,6 +259,16 @@ struct SettingsView: View {
                         Text("1 Hour")
                         Spacer()
                     }
+                }
+                
+                HStack {
+                    Image(systemName: "clock")
+                        .foregroundColor(.accentColor)
+                    DatePicker("At", selection: $sleepAtTime, displayedComponents: .hourAndMinute)
+                    Button("Start") {
+                        sleepTimer.startTimer(type: .atSpecificTime, specificTime: sleepAtTime)
+                    }
+                    .buttonStyle(.borderless)
                 }
             }
         }

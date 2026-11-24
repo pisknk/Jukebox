@@ -14,8 +14,9 @@ struct LyricsView: View {
     
     @State private var lyrics: [LyricLine] = []
     @State private var isLoading = true
-    @State private var currentIndex: Int = 0
-    @StateObject private var favoritesManager = FavoritesManager.shared
+    @State private var currentIndex: Int = -1  // -1 = before the first line
+    @State private var loadedSongID: UInt64? = nil
+    @ObservedObject private var favoritesManager = FavoritesManager.shared
     @State private var isUserScrolling = false
     @State private var scrollTimer: Timer?
     
@@ -37,7 +38,11 @@ struct LyricsView: View {
         .background(background)
         .preferredColorScheme(.dark)
         .onAppear(perform: loadLyrics)
-        .onReceive(musicManager.$currentTime, perform: updateCurrentLine)
+        .onDisappear {
+            scrollTimer?.invalidate()
+            scrollTimer = nil
+        }
+        .onReceive(musicManager.progress.$currentTime, perform: updateCurrentLine)
         .onChange(of: musicManager.currentSong?.persistentID) { _ in
             loadLyrics()
         }
@@ -53,12 +58,10 @@ struct LyricsView: View {
     
     private var background: some View {
         Group {
-            if let song = musicManager.currentSong,
-               let artwork = song.artwork,
-               let image = artwork.image(at: CGSize(width: 400, height: 400)) {
-                AlbumFluidGradient(image: image)
+            if let song = musicManager.currentSong, let image = musicManager.currentArtwork {
+                AlbumFluidGradient(image: image, imageID: song.persistentID, isAnimating: musicManager.isPlaying)
             } else {
-                FluidGradientView(colors: [.purple, .blue, .pink, .orange], speed: 0.3)
+                FluidGradientView(colors: [.purple, .blue, .pink, .orange], speed: 0.3, isAnimating: musicManager.isPlaying)
             }
         }
         .ignoresSafeArea()
@@ -70,9 +73,7 @@ struct LyricsView: View {
         HStack(spacing: 12) {
             // album art
             Group {
-                if let song = musicManager.currentSong,
-                   let artwork = song.artwork,
-                   let image = artwork.image(at: CGSize(width: 80, height: 80)) {
+                if let image = musicManager.currentArtwork {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
@@ -151,7 +152,7 @@ struct LyricsView: View {
                             // main lyric line
                             // current line: show without parenthetical (it's shown as subtitle)
                             // other lines: strip parenthetical completely (only show when it's their turn)
-                            Text(stripParenthetical(line.text))
+                            Text(line.isInstrumental ? "♪" : stripParenthetical(line.text))
                                 .font(.system(
                                     size: index == currentIndex ? 32 : 30,
                                     weight: .bold
@@ -201,14 +202,21 @@ struct LyricsView: View {
                     // reset timer
                     scrollTimer?.invalidate()
                     scrollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                        scrollTimer = nil
                         withAnimation(.easeInOut(duration: 0.4)) {
                             isUserScrolling = false
                         }
                     }
                 }
             )
+            .onAppear {
+                // jump straight to the current line when lyrics appear mid-song
+                if currentIndex >= 0 {
+                    proxy.scrollTo(currentIndex, anchor: .top)
+                }
+            }
             .onChange(of: currentIndex) { idx in
-                if !isUserScrolling {
+                if !isUserScrolling && idx >= 0 {
                     // smooth spring animation for scroll movement
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                         proxy.scrollTo(idx, anchor: .top)
@@ -297,18 +305,23 @@ struct LyricsView: View {
     }
     
     private func loadLyrics() {
+        lyrics = []
+        currentIndex = -1
+        loadedSongID = musicManager.currentSong?.persistentID
+
         guard let song = musicManager.currentSong,
               let title = song.title,
               let artist = song.artist else {
             isLoading = false
             return
         }
-        
+
         isLoading = true
-        lyrics = []
-        currentIndex = 0
-        
+        let requestedID = song.persistentID
+
         LyricsManager.shared.getLyrics(track: title, artist: artist) { result in
+            // the song changed while we were waiting: these lyrics belong to the old one
+            guard requestedID == loadedSongID else { return }
             isLoading = false
             if let result = result, !result.isEmpty {
                 lyrics = result
@@ -316,11 +329,12 @@ struct LyricsView: View {
             }
         }
     }
-    
+
     private func updateCurrentLine(time: TimeInterval) {
-        guard !lyrics.isEmpty,
-              let idx = LyricsManager.shared.currentLineIndex(for: time, in: lyrics),
-              idx != currentIndex else { return }
-        currentIndex = idx
+        guard !lyrics.isEmpty else { return }
+        let idx = LyricsManager.shared.currentLineIndex(for: time, in: lyrics) ?? -1
+        if idx != currentIndex {
+            currentIndex = idx
+        }
     }
 }

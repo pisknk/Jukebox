@@ -15,11 +15,11 @@ enum SleepTimerType: String, CaseIterable, Codable {
     case thirtyMinutes = "30 Minutes"
     case oneHour = "1 Hour"
     case atSpecificTime = "At Specific Time"
-    
+
     var displayName: String {
         return self.rawValue
     }
-    
+
     var icon: String {
         switch self {
         case .off: return "moon.zzz"
@@ -30,122 +30,106 @@ enum SleepTimerType: String, CaseIterable, Codable {
     }
 }
 
-class SleepTimerManager: ObservableObject {
+final class SleepTimerManager: ObservableObject {
     static let shared = SleepTimerManager()
-    
-    @Published var timerType: SleepTimerType = .off
-    @Published var targetTime: Date = Date()
-    @Published var remainingTime: TimeInterval = 0
-    @Published var isActive: Bool = false
-    @Published var songsRemaining: Int = 0
-    
+
+    @Published private(set) var timerType: SleepTimerType = .off
+    @Published private(set) var fireDate: Date?
+    @Published private(set) var remainingTime: TimeInterval = 0
+    @Published private(set) var isActive: Bool = false
+
     private var timer: Timer?
-    private var cancellables = Set<AnyCancellable>()
-    
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
     private init() {}
-    
-    // start timer based on type
+
+    /// start timer based on type. `specificTime` is only used for `.atSpecificTime`
+    /// (only its hour and minute matter).
     func startTimer(type: SleepTimerType, specificTime: Date? = nil) {
         stopTimer()
-        timerType = type
-        isActive = type != .off
-        
+        let now = Date()
+
+        let date: Date?
         switch type {
         case .off:
             return
         case .afterOneSong:
-            songsRemaining = 1
+            date = nil
         case .fifteenMinutes:
-            remainingTime = 15 * 60
-            startCountdownTimer()
+            date = now.addingTimeInterval(15 * 60)
         case .thirtyMinutes:
-            remainingTime = 30 * 60
-            startCountdownTimer()
+            date = now.addingTimeInterval(30 * 60)
         case .oneHour:
-            remainingTime = 60 * 60
-            startCountdownTimer()
+            date = now.addingTimeInterval(60 * 60)
         case .atSpecificTime:
-            if let time = specificTime {
-                targetTime = time
-                calculateRemainingTimeToTarget()
-                startCountdownTimer()
+            guard let time = specificTime else { return }
+            // worked out once, so the deadline stays put and the timer actually fires
+            date = SleepTimerMath.fireDate(forTimeOfDay: time, after: now)
+        }
+
+        timerType = type
+        isActive = true
+        fireDate = date
+
+        if let date = date {
+            remainingTime = date.timeIntervalSince(now)
+            // counts down from a fixed deadline, so it stays accurate even if ticks are delayed
+            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+                self?.tick()
             }
+            RunLoop.main.add(timer, forMode: .common)
+            self.timer = timer
         }
     }
-    
-    private func calculateRemainingTimeToTarget() {
-        let now = Date()
-        var target = targetTime
-        
-        // if target is before now, assume it's tomorrow
-        if target <= now {
-            target = Calendar.current.date(byAdding: .day, value: 1, to: target) ?? target
-        }
-        
-        remainingTime = target.timeIntervalSince(now)
-    }
-    
-    private func startCountdownTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            
-            if self.timerType == .atSpecificTime {
-                self.calculateRemainingTimeToTarget()
-            } else {
-                self.remainingTime -= 1
-            }
-            
-            if self.remainingTime <= 0 {
-                self.triggerSleep()
-            }
-        }
-    }
-    
-    // called when song finishes playing
-    func onSongFinished() {
-        guard isActive && timerType == .afterOneSong else { return }
-        
-        songsRemaining -= 1
-        if songsRemaining <= 0 {
+
+    private func tick() {
+        guard let fireDate = fireDate else { return }
+        remainingTime = max(0, fireDate.timeIntervalSinceNow)
+        if remainingTime <= 0 {
             triggerSleep()
         }
     }
-    
+
     func triggerSleep() {
-        // stop playback if playing
         let manager = MusicPlayerManager.shared
         if manager.isPlaying {
-            manager.togglePlayPause()
+            manager.pause()
         }
         stopTimer()
     }
-    
+
     func stopTimer() {
         timer?.invalidate()
         timer = nil
         timerType = .off
         isActive = false
+        fireDate = nil
         remainingTime = 0
-        songsRemaining = 0
     }
-    
+
     // formatted remaining time string
     var formattedRemainingTime: String {
         if timerType == .afterOneSong {
             return "After this song"
         }
-        
-        let hours = Int(remainingTime) / 3600
-        let minutes = (Int(remainingTime) % 3600) / 60
-        let seconds = Int(remainingTime) % 60
-        
+
+        let total = Int(remainingTime.rounded(.up))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+
         if hours > 0 {
             return String(format: "%d:%02d:%02d", hours, minutes, seconds)
         } else {
             return String(format: "%d:%02d", minutes, seconds)
         }
     }
-    
+
     // short description for queue view
     var shortDescription: String {
         switch timerType {
@@ -156,9 +140,8 @@ class SleepTimerManager: ObservableObject {
         case .fifteenMinutes, .thirtyMinutes, .oneHour:
             return "Stops in \(formattedRemainingTime)"
         case .atSpecificTime:
-            let formatter = DateFormatter()
-            formatter.timeStyle = .short
-            return "Stops at \(formatter.string(from: targetTime))"
+            guard let fireDate = fireDate else { return "" }
+            return "Stops at \(Self.timeFormatter.string(from: fireDate))"
         }
     }
 }

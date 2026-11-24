@@ -2,168 +2,142 @@
 //  LyricsManager.swift
 //  Jukebox
 //
-//  fetches synced lyrics from lrclib.net api with persistent caching
+//  fetches synced lyrics from lrclib.net api with a size-limited cache on disk.
+//  all state is only touched on the main thread.
 //
 
 import Foundation
 
-// MARK: - lyric line model
-struct LyricLine: Identifiable, Codable {
-    let id: UUID
-    let time: TimeInterval  // time in seconds
-    let text: String
-    
-    init(id: UUID = UUID(), time: TimeInterval, text: String) {
-        self.id = id
-        self.time = time
-        self.text = text
-    }
-}
-
 final class LyricsManager {
     static let shared = LyricsManager()
-    
+
     private let baseURL = "https://lrclib.net/api"
-    private var memoryCache: [String: [LyricLine]] = [:]
-    private let cacheKey = "com.jukebox.lyrics.cache"
-    
+    private let maxCachedSongs = 500
+
+    private var cache: [String: [LyricLine]] = [:]
+    private var cacheOrder: [String] = []        // oldest first, for trimming
+    private var knownMissing: Set<String> = []   // songs lrclib has no synced lyrics for (this session)
+
+    private let cacheFile: URL
+    private let ioQueue = DispatchQueue(label: "jukebox.lyrics.cache", qos: .utility)
+    private let legacyDefaultsKey = "com.jukebox.lyrics.cache"
+
+    private struct StoredCache: Codable {
+        var entries: [String: [LyricLine]]
+        var order: [String]
+    }
+
     private init() {
-        loadPersistentCache()
-    }
-    
-    // MARK: - persistent cache
-    
-    private func loadPersistentCache() {
-        guard let data = UserDefaults.standard.data(forKey: cacheKey),
-              let decoded = try? JSONDecoder().decode([String: [LyricLine]].self, from: data) else {
-            return
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        cacheFile = caches.appendingPathComponent("lyrics_cache.json")
+
+        // the old cache lived in UserDefaults and was parsed by the old parser; drop it
+        UserDefaults.standard.removeObject(forKey: legacyDefaultsKey)
+
+        if let data = try? Data(contentsOf: cacheFile),
+           let stored = try? JSONDecoder().decode(StoredCache.self, from: data) {
+            cache = stored.entries
+            cacheOrder = stored.order.filter { stored.entries[$0] != nil }
         }
-        memoryCache = decoded
     }
-    
-    private func savePersistentCache() {
-        guard let encoded = try? JSONEncoder().encode(memoryCache) else { return }
-        UserDefaults.standard.set(encoded, forKey: cacheKey)
-    }
-    
+
     // MARK: - fetch lyrics
-    
+
+    /// call on the main thread; completion runs on the main thread
     func getLyrics(track: String, artist: String, completion: @escaping ([LyricLine]?) -> Void) {
-        // check cache first
-        let cacheKey = "\(artist)-\(track)".lowercased()
-        if let cached = memoryCache[cacheKey] {
+        let key = "\(artist)-\(track)".lowercased()
+        if let cached = cache[key] {
             completion(cached)
             return
         }
-        
-        // build url
+        if knownMissing.contains(key) {
+            completion(nil)
+            return
+        }
+
         var components = URLComponents(string: "\(baseURL)/get")!
-        components.queryItems = [
-            URLQueryItem(name: "track_name", value: track),
-            URLQueryItem(name: "artist_name", value: artist)
-        ]
-        
+        components.percentEncodedQuery = FormEncoding.query([
+            "track_name": track,
+            "artist_name": artist
+        ])
         guard let url = components.url else {
             completion(nil)
             return
         }
-        
+
         var request = URLRequest(url: url)
-        request.setValue("Jukebox/1.0", forHTTPHeaderField: "User-Agent")
-        
+        request.setValue("Jukebox/1.0 (iOS music player)", forHTTPHeaderField: "User-Agent")
+
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let self = self,
-                  let data = data,
-                  error == nil else {
-                DispatchQueue.main.async { completion(nil) }
-                return
+            let status = (response as? HTTPURLResponse)?.statusCode
+            var lines: [LyricLine]? = nil
+            if error == nil, let data = data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let synced = json["syncedLyrics"] as? String, !synced.isEmpty {
+                // only synced lyrics: plain lyrics have no timestamps
+                let parsed = LRCParser.parse(synced)
+                lines = parsed.isEmpty ? nil : parsed
             }
-            
-            // parse response
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                DispatchQueue.main.async { completion(nil) }
-                return
+            // only remember "no lyrics" for a real answer, not a network failure
+            let definitelyMissing = error == nil && (status == 404 || (status == 200 && lines == nil))
+
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let lines = lines {
+                    self.store(lines, for: key)
+                } else if definitelyMissing {
+                    self.knownMissing.insert(key)
+                }
+                completion(lines)
             }
-            
-            // only use synced lyrics (ignore plain lyrics as they lack timestamps)
-            var lyrics: [LyricLine]?
-            
-            if let syncedLyrics = json["syncedLyrics"] as? String, !syncedLyrics.isEmpty {
-                lyrics = self.parseLRC(syncedLyrics)
-            }
-            
-            // cache result persistently
-            if let lyrics = lyrics {
-                self.memoryCache[cacheKey] = lyrics
-                self.savePersistentCache()
-            }
-            
-            DispatchQueue.main.async { completion(lyrics) }
         }.resume()
     }
-    
-    // MARK: - parse lrc format
-    
-    private func parseLRC(_ lrc: String) -> [LyricLine] {
-        var lines: [LyricLine] = []
-        
-        // regex: [mm:ss.xx] or [mm:ss]
-        let pattern = #"\[(\d+):(\d+)(?:\.(\d+))?\]\s*(.*)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        
-        for line in lrc.components(separatedBy: "\n") {
-            let range = NSRange(line.startIndex..., in: line)
-            if let match = regex.firstMatch(in: line, range: range) {
-                let minutes = Int((line as NSString).substring(with: match.range(at: 1))) ?? 0
-                let seconds = Int((line as NSString).substring(with: match.range(at: 2))) ?? 0
-                var milliseconds = 0
-                if match.range(at: 3).location != NSNotFound {
-                    let msStr = (line as NSString).substring(with: match.range(at: 3))
-                    milliseconds = Int(msStr) ?? 0
-                    // handle different precision (2 or 3 digits)
-                    if msStr.count == 2 { milliseconds *= 10 }
-                }
-                
-                let text = (line as NSString).substring(with: match.range(at: 4))
-                let time = TimeInterval(minutes * 60 + seconds) + TimeInterval(milliseconds) / 1000.0
-                
-                if !text.isEmpty {
-                    lines.append(LyricLine(time: time, text: text))
-                }
-            }
+
+    // MARK: - cache
+
+    private func store(_ lines: [LyricLine], for key: String) {
+        cache[key] = lines
+        cacheOrder.removeAll { $0 == key }
+        cacheOrder.append(key)
+        while cacheOrder.count > maxCachedSongs {
+            cache.removeValue(forKey: cacheOrder.removeFirst())
         }
-        
-        return lines.sorted { $0.time < $1.time }
+        save()
     }
-    
+
+    private func save() {
+        let snapshot = StoredCache(entries: cache, order: cacheOrder)
+        let file = cacheFile
+        ioQueue.async {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: file, options: .atomic)
+        }
+    }
+
     // MARK: - find current line index
-    
+
     func currentLineIndex(for time: TimeInterval, in lyrics: [LyricLine]) -> Int? {
-        guard !lyrics.isEmpty else { return nil }
-        
-        // find the last line that has started
-        var index: Int? = nil
-        for (i, line) in lyrics.enumerated() {
-            if line.time <= time {
-                index = i
-            } else {
-                break
-            }
-        }
-        return index
+        LRCParser.lineIndex(at: time, in: lyrics)
     }
-    
-    // MARK: - clear cache (optional utility)
-    
+
+    // MARK: - clear cache
+
     func clearCache() {
-        memoryCache.removeAll()
-        UserDefaults.standard.removeObject(forKey: cacheKey)
+        cache.removeAll()
+        cacheOrder.removeAll()
+        knownMissing.removeAll()
+        let file = cacheFile
+        ioQueue.async {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
-    
+
     // MARK: - cache size
-    
+
     func cacheSize() -> Int64 {
-        guard let data = UserDefaults.standard.data(forKey: cacheKey) else { return 0 }
-        return Int64(data.count)
+        // wait for pending writes so the number is current
+        ioQueue.sync {}
+        let attributes = try? FileManager.default.attributesOfItem(atPath: cacheFile.path)
+        return (attributes?[.size] as? NSNumber)?.int64Value ?? 0
     }
 }

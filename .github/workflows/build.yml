@@ -7,13 +7,37 @@ on:
   workflow_dispatch:
 
 jobs:
+  logic-tests:
+    name: Logic tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile and run logic tests
+        run: |
+          swiftc -O -o logic-tests Jukebox/Jukebox/Logic/*.swift Tests/LogicTests/main.swift
+          ./logic-tests
+
   build:
+    name: Build unsigned IPA
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
       - name: Show Xcode version
         run: xcodebuild -version
+
+      - name: Add Last.fm keys (if the repo has them as secrets)
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_API_SECRET: ${{ secrets.LASTFM_API_SECRET }}
+        run: |
+          if [ -n "$LASTFM_API_KEY" ] && [ -n "$LASTFM_API_SECRET" ]; then
+            printf 'LASTFM_API_KEY = %s\nLASTFM_API_SECRET = %s\n' "$LASTFM_API_KEY" "$LASTFM_API_SECRET" > Jukebox/Config/Secrets.xcconfig
+            echo "Last.fm keys added"
+          else
+            echo "No Last.fm secrets set; building without Last.fm"
+          fi
 
       - name: Build (unsigned)
         run: |
@@ -37,3 +61,29 @@ jobs:
         with:
           name: Jukebox-ipa
           path: Jukebox.ipa
+
+  simulator-smoke-test:
+    name: Simulator launch test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build for simulator
+        run: |
+          xcodebuild -project Jukebox/Jukebox.xcodeproj \
+            -target Jukebox \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            SYMROOT="$PWD/build" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Launch on a simulator and check it stays running
+        run: bash .github/scripts/simulator-smoke-test.sh build/Debug-iphonesimulator/Jukebox.app
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-smoke-test
+          path: smoke-test/

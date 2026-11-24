@@ -93,7 +93,7 @@ struct ContentView: View {
             // hide the default tab bar
             UITabBar.appearance().isHidden = true
             
-            if !musicManager.hasPermission {
+            if !musicManager.hasPermission && MPMediaLibrary.authorizationStatus() == .notDetermined {
                 musicManager.checkPermission()
             }
         }
@@ -156,14 +156,14 @@ struct NowPlayingModalView: View {
     @EnvironmentObject var musicManager: MusicPlayerManager
     @Binding var isPresented: Bool
     
-    @State private var volume: Double = 0.5
-    @StateObject private var favoritesManager = FavoritesManager.shared
+    @ObservedObject private var favoritesManager = FavoritesManager.shared
     @State private var showQueue: Bool = false
     @State private var showLyrics: Bool = false
     @State private var gradientOpacity: Double = 1.0
     @State private var previousSongId: UInt64? = nil
     @State private var showFavoriteToast: Bool = false
     @State private var favoriteToastMessage: String = ""
+    @State private var toastID = 0
     @State private var navigateToArtist: Bool = false
     @State private var navigateToAlbum: Bool = false
     
@@ -228,16 +228,14 @@ struct NowPlayingModalView: View {
         .sheet(isPresented: $navigateToArtist) {
             if let song = musicManager.currentSong {
                 NavigationView {
-                    ArtistDetailView(
-                        artistName: song.artist ?? "Unknown Artist",
-                        artistAlbums: getArtistAlbums(for: song.artist ?? "")
-                    )
+                    ArtistDetailView(artistName: song.artist ?? "Unknown Artist")
                     .toolbar {
                         ToolbarItem(placement: .navigationBarLeading) {
                             Button("Done") { navigateToArtist = false }
                         }
                     }
                 }
+                .environmentObject(musicManager)
             }
         }
         .sheet(isPresented: $navigateToAlbum) {
@@ -278,34 +276,20 @@ struct NowPlayingModalView: View {
         return favoritesManager.isFavorite(songID)
     }
     
-    // helper to get artist albums
-    private func getArtistAlbums(for artist: String) -> [MPMediaItemCollection] {
-        let query = MPMediaQuery.albums()
-        let predicate = MPMediaPropertyPredicate(value: artist, forProperty: MPMediaItemPropertyArtist)
-        query.addFilterPredicate(predicate)
-        return query.collections ?? []
-    }
-    
     // helper to get album collection for a song
     private func getAlbumCollection(for song: MPMediaItem) -> MPMediaItemCollection {
-        let query = MPMediaQuery.albums()
-        let predicate = MPMediaPropertyPredicate(value: song.albumPersistentID, forProperty: MPMediaItemPropertyAlbumPersistentID)
-        query.addFilterPredicate(predicate)
-        return query.collections?.first ?? MPMediaItemCollection(items: [song])
+        LibraryQueries.album(containing: song) ?? MPMediaItemCollection(items: [song])
     }
     
     // MARK: - Background
     private var nowPlayingBackground: some View {
         Group {
-            if let song = musicManager.currentSong, let artwork = song.artwork {
-                let imageSize = CGSize(width: 400, height: 400)
-                if let image = artwork.image(at: imageSize) {
-                    AlbumFluidGradient(image: image, isAnimating: true)
-                } else {
-                    FluidGradientView(colors: [.purple, .blue, .pink, .orange], speed: 0.3, isAnimating: true)
-                }
+            if let song = musicManager.currentSong, let image = musicManager.currentArtwork {
+                AlbumFluidGradient(image: image, imageID: song.persistentID, isAnimating: musicManager.isPlaying)
+            } else if musicManager.currentSong != nil {
+                FluidGradientView(colors: [.purple, .blue, .pink, .orange], speed: 0.3, isAnimating: musicManager.isPlaying)
             } else {
-                FluidGradientView(colors: [.gray, .brown, .black], speed: 0.2, isAnimating: true)
+                FluidGradientView(colors: [.gray, .brown, .black], speed: 0.2, isAnimating: false)
             }
         }
     }
@@ -317,21 +301,16 @@ struct NowPlayingModalView: View {
             Spacer().frame(height: 60)
             
             // album artwork
-            if let artwork = song.artwork {
-                let artworkSize = CGSize(width: 400, height: 400)
-                if let image = artwork.image(at: artworkSize) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 380)
-                        .cornerRadius(8)
-                        .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
-                        .padding(.horizontal, 30)
-                        .scaleEffect(musicManager.isPlaying ? 1 : 0.95)
-                        .animation(.spring(), value: musicManager.isPlaying)
-                } else {
-                    placeholderArtwork
-                }
+            if let image = musicManager.currentArtwork {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxHeight: 380)
+                    .cornerRadius(8)
+                    .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
+                    .padding(.horizontal, 30)
+                    .scaleEffect(musicManager.isPlaying ? 1 : 0.95)
+                    .animation(.spring(), value: musicManager.isPlaying)
             } else {
                 placeholderArtwork
             }
@@ -375,8 +354,11 @@ struct NowPlayingModalView: View {
                         showFavoriteToast = true
                     }
                     
-                    // hide toast after delay
+                    // hide toast after delay (unless a newer toast replaced it)
+                    toastID += 1
+                    let currentToast = toastID
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        guard currentToast == toastID else { return }
                         withAnimation(.easeOut) {
                             showFavoriteToast = false
                         }
@@ -392,47 +374,12 @@ struct NowPlayingModalView: View {
         
         Spacer().frame(height: 24)
         
-        // progress
-        VStack(spacing: 8) {
-            CustomProgressSlider(
-                currentTime: musicManager.currentTime,
-                duration: musicManager.duration,
-                onSeek: { musicManager.seek(to: $0) }
-            )
-            .padding(.horizontal, 30)
-            
-            HStack {
-                Text(formatTime(musicManager.currentTime))
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundColor(.white.opacity(0.6))
-                    .frame(width: 45, alignment: .leading)
-                
-                Spacer()
-                
-                // bit rate badge - centered and fixed position
-                if let quality = musicManager.audioQuality {
-                    HStack(spacing: 4) {
-                        Image(systemName: quality.iconName)
-                            .font(.system(size: 10))
-                        Text(quality.badgeText)
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.15))
-                    .cornerRadius(6)
-                }
-                
-                Spacer()
-                
-                Text("-" + formatTime(musicManager.duration - musicManager.currentTime))
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundColor(.white.opacity(0.6))
-                    .frame(width: 45, alignment: .trailing)
-            }
-            .padding(.horizontal, 30)
-        }
+        // progress (its own view, so only it redraws as the song plays)
+        NowPlayingProgressSection(
+            progress: musicManager.progress,
+            quality: musicManager.audioQuality,
+            onSeek: { musicManager.seek(to: $0) }
+        )
         
         Spacer().frame(height: 40)
         
@@ -521,7 +468,8 @@ struct NowPlayingModalView: View {
         ZStack {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color.white.opacity(0.1))
-                .frame(height: 380)
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxHeight: 380)
             
             Image(systemName: "music.note")
                 .font(.system(size: 80))
@@ -531,10 +479,63 @@ struct NowPlayingModalView: View {
         .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
     }
     
+}
+
+// MARK: - Now Playing Progress
+struct NowPlayingProgressSection: View {
+    @ObservedObject var progress: PlaybackProgress
+    let quality: MusicPlayerManager.AudioQuality?
+    let onSeek: (TimeInterval) -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            CustomProgressSlider(
+                currentTime: progress.currentTime,
+                duration: progress.duration,
+                onSeek: onSeek
+            )
+            .padding(.horizontal, 30)
+
+            HStack {
+                Text(formatTime(progress.currentTime))
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(.white.opacity(0.6))
+                    .monospacedDigit()
+                    .frame(width: 45, alignment: .leading)
+
+                Spacer()
+
+                // bit rate badge - centered and fixed position
+                if let quality = quality {
+                    HStack(spacing: 4) {
+                        Image(systemName: quality.iconName)
+                            .font(.system(size: 10))
+                        Text(quality.badgeText)
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.white.opacity(0.15))
+                    .cornerRadius(6)
+                }
+
+                Spacer()
+
+                Text("-" + formatTime(max(0, progress.duration - progress.currentTime)))
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(.white.opacity(0.6))
+                    .monospacedDigit()
+                    .frame(width: 45, alignment: .trailing)
+            }
+            .padding(.horizontal, 30)
+        }
+    }
+
     private func formatTime(_ time: TimeInterval) -> String {
-        let minutes = Int(time) / 60
-        let seconds = Int(time) % 60
-        return String(format: "%d:%02d", minutes, seconds)
+        guard time.isFinite else { return "0:00" }
+        let total = Int(time)
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
 
@@ -547,17 +548,12 @@ struct MiniPlayerBar: View {
         Button(action: { showNowPlaying = true }) {
             HStack(spacing: 12) {
                 // album artwork
-                if let song = musicManager.currentSong, let artwork = song.artwork {
-                    let size = CGSize(width: 48, height: 48)
-                    if let image = artwork.image(at: size) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 48, height: 48)
-                            .cornerRadius(6)
-                    } else {
-                        placeholderArt
-                    }
+                if let image = musicManager.currentArtwork {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 48, height: 48)
+                        .cornerRadius(6)
                 } else {
                     placeholderArt
                 }

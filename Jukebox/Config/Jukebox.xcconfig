@@ -1,0 +1,11 @@
+// Jukebox.xcconfig
+// Base build settings for the Jukebox app target.
+//
+// Last.fm keys are NOT stored in the repository. To enable Last.fm, copy
+// Secrets.example.xcconfig to Secrets.xcconfig (same folder, ignored by git) and fill it in.
+// Without it the app still builds; Last.fm sign-in is just unavailable.
+
+LASTFM_API_KEY =
+LASTFM_API_SECRET =
+
+#include? "Secrets.xcconfig"

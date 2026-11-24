@@ -10,35 +10,42 @@ import MediaPlayer
 
 struct ArtistDetailView: View {
     let artistName: String
-    let artistAlbums: [MPMediaItemCollection]
     @EnvironmentObject var musicManager: MusicPlayerManager
-    
+
+    /// loaded when the view appears, so building a list of artist links stays cheap
+    @State private var artistAlbums: [MPMediaItemCollection] = []
+    @State private var albumsLoaded = false
     @State private var artistImageURL: URL?
     @State private var isLoadingImage = true
-    
+
+    init(artistName: String) {
+        self.artistName = artistName
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 // artist header
                 VStack(spacing: 12) {
                     artistImageView
-                    
+
                     Text(artistName)
                         .font(.system(size: 26, weight: .bold))
-                    
-                    Text("\(artistAlbums.count) albums")
+                        .multilineTextAlignment(.center)
+
+                    Text(albumsLoaded ? "\(artistAlbums.count) albums" : " ")
                         .font(.system(size: 16))
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 20)
-                
+
                 // albums section
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Albums")
                         .font(.system(size: 22, weight: .bold))
                         .padding(.horizontal, 20)
-                    
+
                     ForEach(artistAlbums, id: \.persistentID) { album in
                         NavigationLink(destination: AlbumDetailView(album: album)) {
                             HStack(spacing: 16) {
@@ -57,19 +64,19 @@ struct ArtistDetailView: View {
                                             .foregroundColor(.gray)
                                     }
                                 }
-                                
+
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(album.representativeItem?.albumTitle ?? "Unknown Album")
                                         .font(.system(size: 17, weight: .medium))
                                         .foregroundColor(.primary)
-                                    
+
                                     Text("\(album.count) songs")
                                         .font(.system(size: 14))
                                         .foregroundColor(.secondary)
                                 }
-                                
+
                                 Spacer()
-                                
+
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundColor(.secondary.opacity(0.5))
@@ -79,19 +86,23 @@ struct ArtistDetailView: View {
                         }
                     }
                 }
-                
+
                 Spacer(minLength: 100)
             }
         }
         .navigationTitle(artistName)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            if !albumsLoaded {
+                artistAlbums = LibraryQueries.albums(forArtist: artistName)
+                albumsLoaded = true
+            }
             loadArtistImage()
         }
     }
-    
+
     // MARK: - artist image view
-    
+
     @ViewBuilder
     private var artistImageView: some View {
         if let url = artistImageURL {
@@ -119,7 +130,7 @@ struct ArtistDetailView: View {
             placeholderView
         }
     }
-    
+
     private var placeholderView: some View {
         ZStack {
             Circle()
@@ -129,15 +140,15 @@ struct ArtistDetailView: View {
                     endPoint: .bottomTrailing
                 ))
                 .frame(width: 160, height: 160)
-            
+
             Image(systemName: "music.mic")
                 .font(.system(size: 50))
                 .foregroundColor(.pink)
         }
     }
-    
+
     // MARK: - load artist image
-    
+
     private func loadArtistImage() {
         ArtistImageManager.shared.getArtistImage(name: artistName) { url in
             self.artistImageURL = url

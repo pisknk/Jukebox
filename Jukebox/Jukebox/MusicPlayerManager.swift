@@ -9,55 +9,60 @@ import Foundation
 import MediaPlayer
 import AVFoundation
 import Combine
+import UIKit
 
-// MARK: - Repeat Mode
-enum RepeatMode: String, CaseIterable {
-    case off, all, one
-    
-    var icon: String {
-        switch self {
-        case .off: return "repeat"
-        case .all: return "repeat"
-        case .one: return "repeat.1"
-        }
-    }
-    
-    mutating func cycle() {
-        switch self {
-        case .off: self = .all
-        case .all: self = .one
-        case .one: self = .off
-        }
-    }
+// MARK: - Queue Entry
+
+/// one slot in the play queue. each slot has its own id, so the same song can be queued twice
+/// without confusing the queue list.
+struct QueueEntry: Identifiable, Equatable {
+    let id = UUID()
+    let item: MPMediaItem
+
+    static func == (lhs: QueueEntry, rhs: QueueEntry) -> Bool { lhs.id == rhs.id }
 }
 
-class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
-    static let shared = MusicPlayerManager()
-    
-    private var audioPlayer: AVAudioPlayer?
-    private var crossfadePlayer: AVAudioPlayer?  // second player for crossfade
-    private var audioSession = AVAudioSession.sharedInstance()
-    
-    @Published var songs: [MPMediaItem] = []
-    
-    var albums: [MPMediaItemCollection] {
-        MPMediaQuery.albums().collections ?? []
-    }
-    
-    @Published var currentSong: MPMediaItem?
-    @Published var isPlaying: Bool = false
+// MARK: - Playback Progress
+
+/// the playback position lives in its own object so that only the views that show it
+/// (progress bar, time labels, lyrics) redraw while music plays, not the whole app
+final class PlaybackProgress: ObservableObject {
     @Published var currentTime: TimeInterval = 0
     @Published var duration: TimeInterval = 0
+}
+
+final class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    static let shared = MusicPlayerManager()
+
+    let progress = PlaybackProgress()
+
+    private var audioPlayer: AVAudioPlayer?
+    private var crossfadePlayer: AVAudioPlayer?  // second player for crossfade
+    private let audioSession = AVAudioSession.sharedInstance()
+
+    // library
+    @Published private(set) var songs: [MPMediaItem] = []
+    /// bumps every time the library is (re)loaded, so views can refresh cached lists cheaply
+    @Published private(set) var libraryVersion = 0
+    private(set) var songsByID: [UInt64: MPMediaItem] = [:]
     @Published var hasPermission: Bool = false
-    @Published var currentBitRate: Int? = nil
-    
-    private var timer: Timer?
-    private var crossfadeTimer: Timer?  // timer for fade animation
-    private var isCrossfading: Bool = false
-    
-    @Published var currentPlaylist: [MPMediaItem] = []
+
+    // now playing
+    @Published private(set) var currentSong: MPMediaItem?
+    @Published private(set) var currentArtwork: UIImage?
+    @Published private(set) var isPlaying: Bool = false
+    @Published private(set) var currentBitRate: Int? = nil
+
+    var currentTime: TimeInterval { progress.currentTime }
+    var duration: TimeInterval { progress.duration }
+
+    // queue
+    @Published private(set) var currentPlaylist: [QueueEntry] = []
     @Published private(set) var currentIndex: Int? = nil
-    
+    @Published private(set) var autoplayQueue: [QueueEntry] = []  // "Continue Playing"
+    @Published var playbackContextTitle: String = "Unknown Context"
+    private var originalPlaylist: [QueueEntry] = []  // order before shuffle
+
     // playback mode settings (persisted to UserDefaults)
     @Published var shuffleEnabled: Bool = false {
         didSet { UserDefaults.standard.set(shuffleEnabled, forKey: "shuffleEnabled") }
@@ -68,23 +73,14 @@ class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var autoplayEnabled: Bool = true {
         didSet { UserDefaults.standard.set(autoplayEnabled, forKey: "autoplayEnabled") }
     }
-    
-    // original playlist order (before shuffle)
-    private var originalPlaylist: [MPMediaItem] = []
-    
-    // playback context title (e.g., "Playing from Album Name")
-    @Published var playbackContextTitle: String = "Unknown Context"
-    
-    // autoplay queue (upcoming random songs)
-    @Published var autoplayQueue: [MPMediaItem] = []
-    
+
     // Audio Quality Logic
     enum AudioQuality {
         case standard
         case highQuality
         case lossless
         case hiResLossless
-        
+
         var badgeText: String {
             switch self {
             case .standard: return "Standard"
@@ -93,7 +89,7 @@ class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
             case .hiResLossless: return "Hi-Res Lossless"
             }
         }
-        
+
         var iconName: String {
             switch self {
             case .standard: return "waveform"
@@ -103,25 +99,35 @@ class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
             }
         }
     }
-    
+
     var audioQuality: AudioQuality? {
         guard let rate = currentBitRate else { return nil }
-        // thresholds:
-        // > 2000 kbps (approx 24/96) -> Hi-Res
-        // > 500 kbps (FLAC/ALAC typical) -> Lossless
-        // > 250 kbps (AAC 256) -> High Quality
-        // < 250 -> Standard
-        
+        // > 2000 kbps (approx 24/96) -> Hi-Res, > 500 kbps (FLAC/ALAC) -> Lossless,
+        // > 250 kbps (AAC 256) -> High Quality, otherwise Standard
         if rate > 2000 { return .hiResLossless }
         if rate > 500 { return .lossless }
         if rate > 250 { return .highQuality }
         return .standard
     }
-    
-    // Last.fm state
+
+    // internal state
+    private var progressTimer: Timer?
+    private var crossfadeTimer: Timer?
+    private var crossfadeTarget: CrossfadeTarget?
+    private var isCrossfading: Bool { crossfadeTarget != nil }
     private var hasScrobbledCurrentSong = false
-    
-    // crossfade settings (read from UserDefaults)
+    private var currentSongStartedAt = Date()
+    private var wasPlayingBeforeInterruption = false
+    private var bitRateRequestID = 0
+    private var libraryReloadWorkItem: DispatchWorkItem?
+    private var isObservingLibrary = false
+
+    private struct CrossfadeTarget {
+        let entry: QueueEntry
+        let fromAutoplay: Bool
+    }
+
+    // crossfade settings (read from UserDefaults, written by SettingsView)
     private var crossfadeEnabled: Bool {
         UserDefaults.standard.bool(forKey: "crossfadeEnabled")
     }
@@ -130,39 +136,29 @@ class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         return duration > 0 ? duration : 6.0
     }
 
-    
     private override init() {
         super.init()
-        
-        // configure audio session
+
+        // only set the category here. the session is activated when playback starts,
+        // so opening the app doesn't stop music playing in other apps.
         do {
             try audioSession.setCategory(.playback, mode: .default)
-            try audioSession.setActive(true)
         } catch {
-            print("failed to set up audio session: \(error.localizedDescription)")
+            print("failed to set audio session category: \(error.localizedDescription)")
         }
-        
-        // setup remote command center for control center and lock screen
+
         setupRemoteCommandCenter()
-        
-        // observe audio route changes (headphone/bluetooth disconnect)
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleRouteChange),
-            name: AVAudioSession.routeChangeNotification,
-            object: nil
-        )
-        
-        // request media library permission
-        checkPermission()
-        
-        // start timer for progress updates
-        startTimer()
-        
-        // load persisted playback settings
+
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(handleRouteChange), name: AVAudioSession.routeChangeNotification, object: audioSession)
+        center.addObserver(self, selector: #selector(handleInterruption), name: AVAudioSession.interruptionNotification, object: audioSession)
+        center.addObserver(self, selector: #selector(handleLibraryChange), name: .MPMediaLibraryDidChange, object: nil)
+
         loadPersistedSettings()
+        checkPermission()
+        startProgressTimer()
     }
-    
+
     private func loadPersistedSettings() {
         shuffleEnabled = UserDefaults.standard.bool(forKey: "shuffleEnabled")
         if let savedRepeat = UserDefaults.standard.string(forKey: "repeatMode"),
@@ -174,613 +170,677 @@ class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
             autoplayEnabled = UserDefaults.standard.bool(forKey: "autoplayEnabled")
         }
     }
-    
+
     deinit {
-        timer?.invalidate()
+        progressTimer?.invalidate()
         crossfadeTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
     }
-    
-    // MARK: - Audio Route Change Handler
-    
+
+    // MARK: - Audio Session Events
+
+    private func activateAudioSession() {
+        do {
+            try audioSession.setActive(true)
+        } catch {
+            print("failed to activate audio session: \(error.localizedDescription)")
+        }
+    }
+
     @objc private func handleRouteChange(_ notification: Notification) {
         guard let info = notification.userInfo,
               let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
-              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
-        
-        if reason == .oldDeviceUnavailable {
-            // headphones/bluetooth disconnected - pause playback
-            DispatchQueue.main.async {
-                if self.isPlaying {
-                    self.audioPlayer?.pause()
-                    self.crossfadePlayer?.pause()
-                    self.isPlaying = false
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue),
+              reason == .oldDeviceUnavailable else { return }
+
+        // headphones/bluetooth disconnected - pause playback
+        DispatchQueue.main.async {
+            if self.isPlaying { self.pause() }
+        }
+    }
+
+    /// phone calls, siri, alarms, other apps taking over audio
+    @objc private func handleInterruption(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+
+        DispatchQueue.main.async {
+            switch type {
+            case .began:
+                // the system has already paused our audio; keep our state in sync
+                self.wasPlayingBeforeInterruption = self.isPlaying
+                if self.isPlaying { self.pause() }
+            case .ended:
+                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                if self.wasPlayingBeforeInterruption && options.contains(.shouldResume) {
+                    self.resume()
                 }
+                self.wasPlayingBeforeInterruption = false
+            @unknown default:
+                break
             }
         }
     }
-    
+
     // MARK: - Permission
-    
+
     func checkPermission() {
-        let status = MPMediaLibrary.authorizationStatus()
-        print("media library authorization status: \(status.rawValue)")
-        
-        switch status {
+        switch MPMediaLibrary.authorizationStatus() {
         case .authorized:
             hasPermission = true
+            startObservingLibrary()
             loadSongs()
         case .notDetermined:
             MPMediaLibrary.requestAuthorization { [weak self] status in
                 DispatchQueue.main.async {
-                    print("permission request result: \(status.rawValue)")
-                    self?.hasPermission = status == .authorized
+                    guard let self = self else { return }
+                    self.hasPermission = status == .authorized
                     if status == .authorized {
-                        self?.loadSongs()
+                        self.startObservingLibrary()
+                        self.loadSongs()
                     }
                 }
             }
         default:
             hasPermission = false
-            print("media library permission denied or restricted")
         }
     }
-    
-    // MARK: - Load Songs
-    
+
+    // MARK: - Library
+
+    private func startObservingLibrary() {
+        guard !isObservingLibrary else { return }
+        isObservingLibrary = true
+        MPMediaLibrary.default().beginGeneratingLibraryChangeNotifications()
+    }
+
+    /// music synced or removed while the app is running
+    @objc private func handleLibraryChange(_ notification: Notification) {
+        DispatchQueue.main.async {
+            // changes arrive in bursts during a sync; wait for them to settle
+            self.libraryReloadWorkItem?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.loadSongs() }
+            self.libraryReloadWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+        }
+    }
+
     func loadSongs() {
-        let query = MPMediaQuery.songs()
-        songs = query.items ?? []
-        print("loaded \(songs.count) songs from media library")
-        
-        // debug: print first few songs
-        for (index, song) in songs.prefix(5).enumerated() {
-            print("song \(index): \(song.title ?? "unknown") - assetURL: \(song.assetURL != nil ? "available" : "nil")")
-        }
-        
-        // initialize autoplay queue
-        fillAutoplayQueue()
-    }
-    
-    // MARK: - Shuffle Control
-    
-    func toggleShuffle() {
-        shuffleEnabled.toggle()
-        
-        guard !currentPlaylist.isEmpty, let currentIndex = currentIndex else { return }
-        
-        if shuffleEnabled {
-            // save original order and shuffle
-            originalPlaylist = currentPlaylist
-            let currentSongItem = currentPlaylist[currentIndex]
-            
-            // shuffle remaining songs (keep current song at position 0)
-            var remaining = currentPlaylist
-            remaining.remove(at: currentIndex)
-            remaining.shuffle()
-            
-            currentPlaylist = [currentSongItem] + remaining
-            self.currentIndex = 0
-        } else {
-            // restore original order
-            if !originalPlaylist.isEmpty, let song = currentSong {
-                currentPlaylist = originalPlaylist
-                // find current song in original playlist
-                if let newIndex = currentPlaylist.firstIndex(where: { $0.persistentID == song.persistentID }) {
-                    self.currentIndex = newIndex
-                }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let query = MPMediaQuery.songs()
+            query.addFilterPredicate(MPMediaPropertyPredicate(value: false, forProperty: MPMediaItemPropertyIsCloudItem))
+            // songs without a file (DRM-protected or not downloaded) can't be played by AVAudioPlayer
+            let items = (query.items ?? []).filter { $0.assetURL != nil }
+
+            var byID: [UInt64: MPMediaItem] = [:]
+            byID.reserveCapacity(items.count)
+            for item in items { byID[item.persistentID] = item }
+
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.songs = items
+                self.songsByID = byID
+                self.libraryVersion += 1
+                self.autoplayQueue.removeAll { byID[$0.item.persistentID] == nil }
+                self.fillAutoplayQueue()
             }
         }
     }
-    
-    // MARK: - Repeat Control
-    
+
+    func song(withID id: UInt64) -> MPMediaItem? {
+        songsByID[id]
+    }
+
+    // MARK: - Starting Playback
+
+    /// plays `song` with `context` as the queue (album, playlist, the filtered list on screen...)
+    func play(songs context: [MPMediaItem], startWith song: MPMediaItem, context title: String = "Tracks") {
+        var entries = context.map { QueueEntry(item: $0) }
+        var index = context.firstIndex(where: { $0.persistentID == song.persistentID })
+        if index == nil {
+            entries = [QueueEntry(item: song)]
+            index = 0
+        }
+        guard let startIndex = index else { return }
+
+        playbackContextTitle = "Playing from \(title)"
+        originalPlaylist = entries
+        if shuffleEnabled {
+            currentPlaylist = QueueShuffler.shuffled(entries, keepingFirst: startIndex)
+            startPlayback(at: 0)
+        } else {
+            currentPlaylist = entries
+            startPlayback(at: startIndex)
+        }
+    }
+
+    /// plays from the whole library
+    func play(song: MPMediaItem) {
+        play(songs: songs, startWith: song, context: "Tracks")
+    }
+
+    /// "Play" buttons: in order from the first song
+    func playInOrder(songs list: [MPMediaItem], context title: String) {
+        guard let first = list.first else { return }
+        shuffleEnabled = false
+        play(songs: list, startWith: first, context: title)
+    }
+
+    /// "Shuffle" buttons
+    func playShuffled(songs list: [MPMediaItem], context title: String) {
+        guard let start = list.randomElement() else { return }
+        shuffleEnabled = true
+        play(songs: list, startWith: start, context: title)
+    }
+
+    /// starts the song at `index` in the queue. songs that can't be played are skipped.
+    private func startPlayback(at index: Int, skippedSoFar: Int = 0) {
+        cancelCrossfade()
+        guard currentPlaylist.indices.contains(index) else {
+            finishQueue()
+            return
+        }
+
+        // last chance to scrobble the song we're leaving
+        scrobbleCurrentIfEligible()
+
+        currentIndex = index
+        let entry = currentPlaylist[index]
+        if loadAndPlay(entry.item) { return }
+
+        // this one can't be played (missing file, unsupported format) - try the next one
+        let step = QueueNavigator.next(currentIndex: index, count: currentPlaylist.count,
+                                       repeatMode: repeatMode == .one ? .off : repeatMode,
+                                       autoplayAvailable: false)
+        if case .index(let nextIndex) = step, skippedSoFar + 1 < currentPlaylist.count {
+            startPlayback(at: nextIndex, skippedSoFar: skippedSoFar + 1)
+        } else {
+            // nothing playable: show the song we tried, stopped
+            audioPlayer?.stop()
+            audioPlayer = nil
+            currentSong = entry.item
+            currentArtwork = artworkImage(for: entry.item)
+            progress.duration = 0
+            finishQueue()
+        }
+    }
+
+    /// returns false if the song couldn't be loaded
+    private func loadAndPlay(_ song: MPMediaItem) -> Bool {
+        guard let url = song.assetURL else {
+            print("cannot play \(song.title ?? "song"): no asset url")
+            return false
+        }
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.delegate = self
+            player.prepareToPlay()
+
+            audioPlayer?.stop()
+            audioPlayer = player
+
+            activateAudioSession()
+            player.volume = 1
+            player.play()
+            didStartSong(song, player: player)
+            return true
+        } catch {
+            print("failed to play \(song.title ?? "song"): \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// shared bookkeeping whenever a new song becomes the current one
+    private func didStartSong(_ song: MPMediaItem, player: AVAudioPlayer) {
+        currentSong = song
+        currentArtwork = artworkImage(for: song)
+        isPlaying = true
+        progress.duration = player.duration
+        progress.currentTime = player.currentTime
+        hasScrobbledCurrentSong = false
+        currentSongStartedAt = Date()
+
+        loadBitRate(for: song)
+        updateNowPlayingInfo()
+        LastFMManager.shared.nowPlaying(song)
+    }
+
+    private func artworkImage(for song: MPMediaItem) -> UIImage? {
+        song.artwork?.image(at: CGSize(width: 600, height: 600))
+    }
+
+    // MARK: - Transport Controls
+
+    func togglePlayPause() {
+        isPlaying ? pause() : resume()
+    }
+
+    func pause() {
+        // finishing a fade while paused would swap songs behind your back
+        cancelCrossfade()
+        audioPlayer?.pause()
+        isPlaying = false
+        if let player = audioPlayer { progress.currentTime = player.currentTime }
+        updateNowPlayingInfo()
+    }
+
+    func resume() {
+        guard let player = audioPlayer else {
+            // nothing loaded yet (e.g. a song was queued while nothing was playing)
+            if let index = currentIndex { startPlayback(at: index) }
+            return
+        }
+        activateAudioSession()
+        player.play()
+        isPlaying = true
+        updateNowPlayingInfo()
+    }
+
+    func next() {
+        cancelCrossfade()
+        advance()
+    }
+
+    func previous() {
+        cancelCrossfade()
+        let elapsed = audioPlayer?.currentTime ?? progress.currentTime
+        switch QueueNavigator.previous(currentIndex: currentIndex, count: currentPlaylist.count, elapsed: elapsed, repeatMode: repeatMode) {
+        case .restart:
+            seek(to: 0)
+        case .index(let index):
+            startPlayback(at: index)
+        }
+    }
+
+    func seek(to time: TimeInterval) {
+        cancelCrossfade()
+        guard let player = audioPlayer else { return }
+        let clamped = max(0, min(time, player.duration))
+        player.currentTime = clamped
+        progress.currentTime = clamped
+        updateNowPlayingInfo()
+    }
+
+    /// moves on to whatever comes after the current song
+    private func advance() {
+        let step = QueueNavigator.next(currentIndex: currentIndex, count: currentPlaylist.count,
+                                       repeatMode: repeatMode, autoplayAvailable: autoplayEnabled && !songs.isEmpty)
+        switch step {
+        case .index(let index):
+            startPlayback(at: index)
+        case .autoplay:
+            playNextAutoplaySong()
+        case .stop:
+            finishQueue()
+        }
+    }
+
+    /// nothing left to play: stop at the start of the last song
+    private func finishQueue() {
+        audioPlayer?.stop()
+        audioPlayer?.currentTime = 0
+        isPlaying = false
+        progress.currentTime = 0
+        updateNowPlayingInfo()
+    }
+
+    // MARK: - Shuffle / Repeat / Autoplay
+
+    func toggleShuffle() {
+        setShuffle(!shuffleEnabled)
+    }
+
+    func setShuffle(_ enabled: Bool) {
+        guard enabled != shuffleEnabled else { return }
+        shuffleEnabled = enabled
+        guard let index = currentIndex, currentPlaylist.indices.contains(index) else { return }
+
+        if enabled {
+            originalPlaylist = currentPlaylist
+            currentPlaylist = QueueShuffler.shuffled(currentPlaylist, keepingFirst: index)
+            currentIndex = 0
+        } else {
+            let restored = QueueShuffler.unshuffled(current: currentPlaylist, original: originalPlaylist, playing: currentPlaylist[index])
+            currentPlaylist = restored.items
+            currentIndex = restored.index
+        }
+    }
+
     func cycleRepeatMode() {
         repeatMode.cycle()
     }
-    
-    // MARK: - Autoplay Control
-    
+
     func toggleAutoplay() {
         autoplayEnabled.toggle()
         if autoplayEnabled {
             fillAutoplayQueue()
         }
     }
-    
-    // MARK: - Queue Management
-    
-    func moveQueueItem(from source: IndexSet, to destination: Int) {
-        guard let currentIndex = currentIndex else { return }
-        
-        // adjust indices relative to the queue (which starts after current song)
-        let adjustedSource = IndexSet(source.map { $0 + currentIndex + 1 })
-        let adjustedDestination = destination + currentIndex + 1
-        
-        currentPlaylist.move(fromOffsets: adjustedSource, toOffset: adjustedDestination)
-    }
-    
-    func removeFromQueue(at index: Int) {
-        guard index > 0, index < currentPlaylist.count else { return }
-        currentPlaylist.remove(at: index)
-    }
-    
-    func addToQueue(song: MPMediaItem) {
-        // add song to play next (after current song)
-        if let currentIndex = currentIndex {
-            let insertIndex = currentIndex + 1
-            currentPlaylist.insert(song, at: insertIndex)
-        } else {
-            // no current song, just add to end
-            currentPlaylist.append(song)
-        }
-    }
-    
-    func playFromQueueAtIndex(_ index: Int) {
-        guard index >= 0, index < currentPlaylist.count else { return }
-        
-        // set current index to this song and play it
-        currentIndex = index
-        let song = currentPlaylist[index]
-        
-        // setup and play
-        hasScrobbledCurrentSong = false
-        currentSong = song
-        
-        guard let assetURL = song.assetURL else { return }
-        
-        do {
-            audioPlayer?.stop()
-            audioPlayer = try AVAudioPlayer(contentsOf: assetURL)
-            audioPlayer?.delegate = self
-            audioPlayer?.prepareToPlay()
-            audioPlayer?.volume = crossfadeEnabled ? 1.0 : 1.0
-            audioPlayer?.play()
-            
-            isPlaying = true
-            currentTime = 0
-            duration = audioPlayer?.duration ?? 0
-            
-            LastFMManager.shared.scrobble(song)
-            updateNowPlayingInfo()
-            startTimer()
-        } catch {
-            print("error playing song: \(error)")
-        }
-    }
-    
-    // MARK: - Playback Controls
-    
-    func play(song: MPMediaItem) {
-        // play from the full song list, starting at this song (default context)
-        play(songs: self.songs, startWith: song, context: "Tracks")
-    }
-    
-    func play(songs context: [MPMediaItem], startWith song: MPMediaItem, context title: String = "Tracks") {
-        guard let index = context.firstIndex(where: { $0.persistentID == song.persistentID }) else {
-            // fallback if not found in context
-            playSingle(song: song)
+
+    private func playNextAutoplaySong() {
+        if autoplayQueue.isEmpty { fillAutoplayQueue() }
+        guard !autoplayQueue.isEmpty else {
+            finishQueue()
             return
         }
-        
-        // update context title
-        self.playbackContextTitle = "Playing from \(title)"
-        
-        if shuffleEnabled {
-            // create shuffled playlist with selected song first
-            var remaining = context
-            remaining.remove(at: index)
-            remaining.shuffle()
-            
-            // set playlist
-            self.currentPlaylist = [song] + remaining
-            self.originalPlaylist = context
-            self.currentIndex = 0
-        } else {
-            // set playlist
-            self.currentPlaylist = context
-            self.originalPlaylist = context
-            self.currentIndex = index
-        }
-        
-        playSingle(song: song)
+        let entry = autoplayQueue.removeFirst()
+        currentPlaylist.append(entry)
+        fillAutoplayQueue()
+        startPlayback(at: currentPlaylist.count - 1)
     }
-    
-    private func playSingle(song: MPMediaItem) {
-        // check if we should scrobble previous song (if skipped significantly through)
-        if !hasScrobbledCurrentSong, let oldSong = currentSong, let player = audioPlayer {
-            // rule: > threshold % or > 4 mins
-            let threshold = LastFMManager.shared.scrobblePercent
-            if player.currentTime > (player.duration * threshold) || player.currentTime > 240 {
-                LastFMManager.shared.scrobble(oldSong)
-            }
-        }
-        hasScrobbledCurrentSong = false
-        
-        // stop current playback
-        audioPlayer?.stop()
-        
-        // get the asset URL
-        guard let assetURL = song.assetURL else {
-            print("cannot play song: assetURL is nil")
-            return
-        }
-        
-        do {
-            // create and configure audio player
-            audioPlayer = try AVAudioPlayer(contentsOf: assetURL)
-            audioPlayer?.delegate = self
-            audioPlayer?.prepareToPlay()
-            audioPlayer?.play()
-            
-            currentSong = song
-            isPlaying = true
-            duration = audioPlayer?.duration ?? 0
-            currentTime = 0
-            
-            // extract bit rate from asset
-            extractBitRate(from: assetURL)
-            
-            // update now playing info for control center / lock screen
-            updateNowPlayingInfo()
-            
-            // update last.fm now playing
-            LastFMManager.shared.nowPlaying(song)
-        } catch {
-            print("failed to play song: \(error.localizedDescription)")
-        }
-    }
-    
-    private func extractBitRate(from url: URL) {
-        let asset = AVAsset(url: url)
-        Task {
-            do {
-                let tracks = try await asset.loadTracks(withMediaType: .audio)
-                if let track = tracks.first {
-                    let bitRate = try await track.load(.estimatedDataRate)
-                    await MainActor.run {
-                        // convert bits per second to kbps
-                        self.currentBitRate = Int(bitRate / 1000)
-                    }
-                }
-            } catch {
-                print("failed to extract bit rate: \(error)")
-                await MainActor.run {
-                    self.currentBitRate = nil
-                }
-            }
-        }
-    }
-    
-    func togglePlayPause() {
-        guard let player = audioPlayer else { return }
-        
-        if isPlaying {
-            player.pause()
-            isPlaying = false
-        } else {
-            player.play()
-            isPlaying = true
-        }
-    }
-    
-    func next() {
-        // cancel any ongoing crossfade to prevent dual playback
-        cancelCrossfade()
-        
-        guard !currentPlaylist.isEmpty, let index = currentIndex else { return }
-        
-        // check if we're at the end
-        if index >= currentPlaylist.count - 1 {
-            // at the end of playlist
-            if autoplayEnabled {
-                // pick a random song from library
-                playRandomSong()
-            } else if repeatMode == .all {
-                // repeat all: go back to beginning
-                currentIndex = 0
-                playSingle(song: currentPlaylist[0])
-            }
-            // if repeat is off and autoplay is off, do nothing
-        } else {
-            // normal next
-            currentIndex = index + 1
-            playSingle(song: currentPlaylist[currentIndex!])
-        }
-    }
-    
-    func previous() {
-        // cancel any ongoing crossfade to prevent dual playback
-        cancelCrossfade()
-        
-        guard !currentPlaylist.isEmpty, let index = currentIndex else { return }
-        
-        // if more than 3 seconds into song, restart it
-        if currentTime > 3 {
-            seek(to: 0)
-            return
-        }
-        
-        // otherwise go to previous
-        if index > 0 {
-            currentIndex = index - 1
-            playSingle(song: currentPlaylist[currentIndex!])
-        } else if repeatMode == .all {
-            // wrap to end
-            currentIndex = currentPlaylist.count - 1
-            playSingle(song: currentPlaylist[currentIndex!])
-        }
-    }
-    
-    func playRandomSong() {
-        guard !songs.isEmpty else { return }
-        
-        // ensure queue has items
-        if autoplayQueue.isEmpty {
-            fillAutoplayQueue()
-        }
-        
-        if !autoplayQueue.isEmpty {
-            let nextSong = autoplayQueue.removeFirst()
-            
-            // add to end of playlist and play it
-            currentPlaylist.append(nextSong)
-            currentIndex = currentPlaylist.count - 1
-            playSingle(song: nextSong)
-            
-            // replenish queue
-            fillAutoplayQueue()
-        }
-    }
-    
+
     func fillAutoplayQueue() {
         guard !songs.isEmpty else { return }
-        
-        // target size for autoplay queue
+
         let targetSize = 20
         let needed = targetSize - autoplayQueue.count
         guard needed > 0 else { return }
-        
-        var availableSongs = songs
-        
-        // exclude existing playlist and queue
-        let existingIDs = Set(currentPlaylist.map { $0.persistentID } + autoplayQueue.map { $0.persistentID })
-        availableSongs.removeAll { existingIDs.contains($0.persistentID) }
-        
-        // if we ran out of unique songs, just use all songs (fallback)
-        if availableSongs.isEmpty {
-            availableSongs = songs
+
+        // prefer songs that aren't already queued
+        let existingIDs = Set(currentPlaylist.map { $0.item.persistentID } + autoplayQueue.map { $0.item.persistentID })
+        var candidates = songs.filter { !existingIDs.contains($0.persistentID) }
+        if candidates.isEmpty {
+            candidates = songs  // small library: allow repeats
         }
-        
-        // shuffle and pick needed amount
-        if !availableSongs.isEmpty {
-            var candidates = availableSongs
-            candidates.shuffle()
-            let count = min(needed, candidates.count)
-            let newSongs = Array(candidates.prefix(count))
-            autoplayQueue.append(contentsOf: newSongs)
+        candidates.shuffle()
+        autoplayQueue.append(contentsOf: candidates.prefix(needed).map { QueueEntry(item: $0) })
+    }
+
+    // MARK: - Queue Management
+
+    /// songs after the current one
+    var upcomingEntries: [QueueEntry] {
+        guard let index = currentIndex, index + 1 < currentPlaylist.count else { return [] }
+        return Array(currentPlaylist[(index + 1)...])
+    }
+
+    /// offsets are positions in `upcomingEntries`
+    func moveUpcoming(from source: IndexSet, to destination: Int) {
+        guard let index = currentIndex else { return }
+        let head = Array(currentPlaylist[...index])
+        currentPlaylist = head + ArrayEditing.moving(upcomingEntries, fromOffsets: source, toOffset: destination)
+    }
+
+    /// offsets are positions in `upcomingEntries`
+    func removeUpcoming(at offsets: IndexSet) {
+        guard let index = currentIndex else { return }
+        let head = Array(currentPlaylist[...index])
+        currentPlaylist = head + ArrayEditing.removing(upcomingEntries, atOffsets: offsets)
+    }
+
+    /// "Add to Queue": plays right after the current song
+    func addToQueue(song: MPMediaItem) {
+        let entry = QueueEntry(item: song)
+        if let index = currentIndex, currentPlaylist.indices.contains(index) {
+            currentPlaylist.insert(entry, at: index + 1)
+        } else {
+            // nothing playing yet: make it the current song, ready to play
+            currentPlaylist = [entry]
+            originalPlaylist = [entry]
+            currentIndex = 0
+            currentSong = song
+            currentArtwork = artworkImage(for: song)
+            playbackContextTitle = "Playing from Queue"
         }
     }
-    
-    func seek(to time: TimeInterval) {
-        audioPlayer?.currentTime = time
-        currentTime = time
+
+    /// offset is a position in `upcomingEntries`
+    func playUpcoming(at offset: Int) {
+        guard let index = currentIndex else { return }
+        startPlayback(at: index + 1 + offset)
     }
-    
+
+    /// tapping a song in "Continue Playing"
+    func playFromAutoplayQueue(at offset: Int) {
+        guard autoplayQueue.indices.contains(offset) else { return }
+        let entry = autoplayQueue[offset]
+        autoplayQueue.removeFirst(offset + 1)
+        let insertAt = (currentIndex ?? -1) + 1
+        currentPlaylist.insert(entry, at: min(insertAt, currentPlaylist.count))
+        fillAutoplayQueue()
+        startPlayback(at: min(insertAt, currentPlaylist.count - 1))
+    }
+
     // MARK: - AVAudioPlayerDelegate
-    
+
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        guard flag else { return }
-        
-        // if crossfade just completed, don't process again (crossfade already transitioned)
-        // this can happen when old player fully finishes after crossfade swapped it out
-        if player !== audioPlayer {
+        DispatchQueue.main.async {
+            self.handleSongFinished(player)
+        }
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        print("decode error: \(error?.localizedDescription ?? "unknown")")
+        DispatchQueue.main.async {
+            self.handleSongFinished(player)
+        }
+    }
+
+    private func handleSongFinished(_ player: AVAudioPlayer) {
+        // ignore players we've already swapped out
+        guard player === audioPlayer else { return }
+
+        // the old song ran out slightly before the fade timer finished
+        if isCrossfading {
+            completeCrossfade()
             return
         }
-        
-        // scrobble if we haven't yet (song finished = 100% played, always meets threshold)
-        if !hasScrobbledCurrentSong, let song = currentSong {
-            LastFMManager.shared.scrobble(song)
-            hasScrobbledCurrentSong = true
-        }
-        
-        // check repeat mode
+
+        // played to the end
+        scrobbleCurrentIfEligible(playedToEnd: true)
+
         if repeatMode == .one {
-            // repeat the same song
-            hasScrobbledCurrentSong = false // reset for next loop
-            seek(to: 0)
-            audioPlayer?.play()
+            player.currentTime = 0
+            player.play()
+            if let song = currentSong {
+                didStartSong(song, player: player)
+            }
             return
         }
-        
-        // check sleep timer - stop if "after 1 song" is active
+
         let sleepTimer = SleepTimerManager.shared
         if sleepTimer.isActive && sleepTimer.timerType == .afterOneSong {
-            sleepTimer.triggerSleep()
+            finishQueue()
+            sleepTimer.stopTimer()
             return
         }
-        
-        // otherwise go to next
-        next()
+
+        advance()
     }
-    
-    // MARK: - Timer
-    
-    private func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            guard let self = self, self.isPlaying, let player = self.audioPlayer else { return }
-            self.currentTime = player.currentTime
-            self.updateNowPlayingProgress()
-            
-            // check if we should scrobble (threshold reached or 4 minutes played)
-            if !self.hasScrobbledCurrentSong, let song = self.currentSong {
-                let threshold = LastFMManager.shared.scrobblePercent
-                let thresholdTime = player.duration * threshold
-                
-                if player.currentTime >= thresholdTime || player.currentTime >= 240 {
-                    LastFMManager.shared.scrobble(song)
-                    self.hasScrobbledCurrentSong = true
-                    print("scrobbled at \(Int(threshold * 100))% threshold")
-                }
-            }
-            
-            // check for crossfade trigger
-            if self.crossfadeEnabled && !self.isCrossfading && self.repeatMode != .one {
-                // don't crossfade if sleep timer is set to stop after this song
-                let sleepTimer = SleepTimerManager.shared
-                if sleepTimer.isActive && sleepTimer.timerType == .afterOneSong {
-                    // let song finish normally so sleep timer can trigger
-                } else {
-                    let timeRemaining = player.duration - player.currentTime
-                    if timeRemaining <= self.crossfadeDuration && timeRemaining > 0.5 {
-                        self.startCrossfade()
-                    }
-                }
-            }
+
+    // MARK: - Progress Timer
+
+    private func startProgressTimer() {
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            self?.tick()
+        }
+        // .common so it keeps running while the user scrolls
+        RunLoop.main.add(timer, forMode: .common)
+        progressTimer = timer
+    }
+
+    private func tick() {
+        guard isPlaying, let player = audioPlayer else { return }
+        progress.currentTime = player.currentTime
+        scrobbleCurrentIfEligible()
+        startCrossfadeIfNeeded(player)
+    }
+
+    // MARK: - Scrobbling
+
+    private func scrobbleCurrentIfEligible(playedToEnd: Bool = false) {
+        guard !hasScrobbledCurrentSong, let song = currentSong, let player = audioPlayer else { return }
+        let played = playedToEnd ? player.duration : player.currentTime
+        if ScrobbleRule.shouldScrobble(played: played, duration: player.duration, threshold: LastFMManager.shared.scrobblePercent) {
+            LastFMManager.shared.scrobble(song, startedAt: currentSongStartedAt)
+            hasScrobbledCurrentSong = true
         }
     }
-    
+
     // MARK: - Crossfade
-    
-    private func startCrossfade() {
-        guard !isCrossfading else { return }
-        
-        // get next song
-        guard let nextSong = getNextSongForCrossfade() else { return }
-        guard let assetURL = nextSong.assetURL else { return }
-        
-        isCrossfading = true
-        
-        // prepare the crossfade player with next song
-        do {
-            crossfadePlayer = try AVAudioPlayer(contentsOf: assetURL)
-            crossfadePlayer?.volume = 0  // start silent
-            crossfadePlayer?.prepareToPlay()
-            crossfadePlayer?.play()
-            
-            // fade volumes over crossfade duration
-            let fadeSteps = 20
-            let fadeInterval = crossfadeDuration / Double(fadeSteps)
-            var step = 0
-            
-            crossfadeTimer?.invalidate()
-            crossfadeTimer = Timer.scheduledTimer(withTimeInterval: fadeInterval, repeats: true) { [weak self] timer in
-                guard let self = self else { timer.invalidate(); return }
-                
-                step += 1
-                let progress = Double(step) / Double(fadeSteps)
-                
-                // fade out current, fade in next
-                self.audioPlayer?.volume = Float(1.0 - progress)
-                self.crossfadePlayer?.volume = Float(progress)
-                
-                if step >= fadeSteps {
-                    timer.invalidate()
-                    self.completeCrossfade(to: nextSong)
-                }
+
+    private func startCrossfadeIfNeeded(_ player: AVAudioPlayer) {
+        guard crossfadeEnabled, !isCrossfading, repeatMode != .one else { return }
+
+        // let the song end normally so "stop after this song" can trigger
+        let sleepTimer = SleepTimerManager.shared
+        if sleepTimer.isActive && sleepTimer.timerType == .afterOneSong { return }
+
+        // never fade for more than half of a short song
+        let fadeLength = min(crossfadeDuration, player.duration / 2)
+        let remaining = player.duration - player.currentTime
+        guard remaining <= fadeLength, remaining > 0.5 else { return }
+
+        startCrossfade(over: remaining)
+    }
+
+    private func startCrossfade(over fadeLength: TimeInterval) {
+        let step = QueueNavigator.next(currentIndex: currentIndex, count: currentPlaylist.count,
+                                       repeatMode: repeatMode, autoplayAvailable: autoplayEnabled && !songs.isEmpty)
+        let target: CrossfadeTarget
+        switch step {
+        case .index(let index):
+            target = CrossfadeTarget(entry: currentPlaylist[index], fromAutoplay: false)
+        case .autoplay:
+            if autoplayQueue.isEmpty { fillAutoplayQueue() }
+            guard let first = autoplayQueue.first else { return }
+            target = CrossfadeTarget(entry: first, fromAutoplay: true)
+        case .stop:
+            return
+        }
+
+        // if the next song can't be loaded, let this one end normally and advance() will skip it
+        guard let url = target.entry.item.assetURL,
+              let incoming = try? AVAudioPlayer(contentsOf: url) else { return }
+
+        incoming.volume = 0
+        incoming.prepareToPlay()
+        incoming.play()
+        crossfadePlayer = incoming
+        crossfadeTarget = target
+
+        let start = Date()
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] timer in
+            guard let self = self, self.isCrossfading else {
+                timer.invalidate()
+                return
             }
-        } catch {
-            print("crossfade failed: \(error.localizedDescription)")
-            isCrossfading = false
-        }
-    }
-    
-    private func getNextSongForCrossfade() -> MPMediaItem? {
-        // similar logic to next() but without playing
-        if let currentIndex = currentIndex {
-            let nextIndex = currentIndex + 1
-            if nextIndex < currentPlaylist.count {
-                return currentPlaylist[nextIndex]
-            } else if repeatMode == .all {
-                return currentPlaylist.first
-            } else if autoplayEnabled && !autoplayQueue.isEmpty {
-                return autoplayQueue.first
+            let fraction = min(1, Date().timeIntervalSince(start) / fadeLength)
+            self.audioPlayer?.volume = Float(1 - fraction)
+            self.crossfadePlayer?.volume = Float(fraction)
+            if fraction >= 1 {
+                timer.invalidate()
+                self.completeCrossfade()
             }
         }
-        return nil
+        RunLoop.main.add(timer, forMode: .common)
+        crossfadeTimer = timer
     }
-    
-    private func completeCrossfade(to song: MPMediaItem) {
-        // stop old player
-        audioPlayer?.stop()
-        
-        // swap players
-        audioPlayer = crossfadePlayer
-        audioPlayer?.delegate = self
-        audioPlayer?.volume = 1.0
-        crossfadePlayer = nil
-        
-        // update state
-        currentSong = song
-        duration = audioPlayer?.duration ?? 0
-        currentTime = 0
-        hasScrobbledCurrentSong = false
-        
-        // update index
-        if let idx = currentPlaylist.firstIndex(where: { $0.persistentID == song.persistentID }) {
-            currentIndex = idx
-        } else if !autoplayQueue.isEmpty {
-            autoplayQueue.removeFirst()
-        }
-        
-        // update bit rate and now playing info
-        if let url = song.assetURL {
-            extractBitRate(from: url)
-        }
-        updateNowPlayingInfo()
-        LastFMManager.shared.nowPlaying(song)
-        
-        isCrossfading = false
-    }
-    
-    private func cancelCrossfade() {
-        guard isCrossfading else { return }
-        
-        // stop the crossfade timer
+
+    private func completeCrossfade() {
+        guard let target = crossfadeTarget, let incoming = crossfadePlayer else { return }
         crossfadeTimer?.invalidate()
         crossfadeTimer = nil
-        
-        // stop and clear the crossfade player
+
+        // the outgoing song played to the end
+        scrobbleCurrentIfEligible(playedToEnd: true)
+
+        audioPlayer?.stop()
+        incoming.delegate = self
+        incoming.volume = 1
+        audioPlayer = incoming
+        crossfadePlayer = nil
+        crossfadeTarget = nil
+
+        // put the new song in its place in the queue
+        if target.fromAutoplay {
+            autoplayQueue.removeAll { $0.id == target.entry.id }
+            currentPlaylist.append(target.entry)
+            currentIndex = currentPlaylist.count - 1
+            fillAutoplayQueue()
+        } else if let index = currentPlaylist.firstIndex(of: target.entry) {
+            currentIndex = index
+        } else {
+            // the song was removed from the queue while fading in; keep it right after the old one
+            let insertAt = min((currentIndex ?? -1) + 1, currentPlaylist.count)
+            currentPlaylist.insert(target.entry, at: insertAt)
+            currentIndex = insertAt
+        }
+
+        didStartSong(target.entry.item, player: incoming)
+    }
+
+    private func cancelCrossfade() {
+        guard isCrossfading || crossfadePlayer != nil else { return }
+        crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
         crossfadePlayer?.stop()
         crossfadePlayer = nil
-        
-        // restore main player volume
+        crossfadeTarget = nil
         audioPlayer?.volume = 1.0
-        
-        // reset flag
-        isCrossfading = false
     }
-    
-    // MARK: - Remote Command Center (Control Center / Lock Screen)
-    
+
+    // MARK: - Bit Rate
+
+    private func loadBitRate(for song: MPMediaItem) {
+        currentBitRate = nil
+        bitRateRequestID += 1
+        let requestID = bitRateRequestID
+        guard let url = song.assetURL else { return }
+
+        Task {
+            var kbps: Int? = nil
+            let asset = AVURLAsset(url: url)
+            if let track = (try? await asset.loadTracks(withMediaType: .audio))?.first,
+               let rate = try? await track.load(.estimatedDataRate) {
+                kbps = Int(rate / 1000)
+            }
+            DispatchQueue.main.async { [weak self] in
+                // ignore results for a song we've already skipped past
+                guard let self = self, self.bitRateRequestID == requestID else { return }
+                self.currentBitRate = kbps
+            }
+        }
+    }
+
+    // MARK: - Remote Command Center (Control Center / Lock Screen / headphones / CarPlay)
+
     private func setupRemoteCommandCenter() {
         let commandCenter = MPRemoteCommandCenter.shared()
-        
-        // play command
+
         commandCenter.playCommand.addTarget { [weak self] _ in
-            self?.togglePlayPause()
+            guard let self = self, self.currentSong != nil else { return .noActionableNowPlayingItem }
+            self.resume()
             return .success
         }
-        
-        // pause command
+
         commandCenter.pauseCommand.addTarget { [weak self] _ in
-            self?.togglePlayPause()
+            guard let self = self, self.currentSong != nil else { return .noActionableNowPlayingItem }
+            self.pause()
             return .success
         }
-        
-        // next command
+
+        // wired headphone button and some bluetooth remotes
+        commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+            guard let self = self, self.currentSong != nil else { return .noActionableNowPlayingItem }
+            self.togglePlayPause()
+            return .success
+        }
+
         commandCenter.nextTrackCommand.addTarget { [weak self] _ in
-            self?.next()
+            guard let self = self, self.currentSong != nil else { return .noActionableNowPlayingItem }
+            self.next()
             return .success
         }
-        
-        // previous command
+
         commandCenter.previousTrackCommand.addTarget { [weak self] _ in
-            self?.previous()
+            guard let self = self, self.currentSong != nil else { return .noActionableNowPlayingItem }
+            self.previous()
             return .success
         }
-        
-        // seek command
+
         commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let self = self,
                   let positionEvent = event as? MPChangePlaybackPositionCommandEvent else {
@@ -790,34 +850,28 @@ class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
             return .success
         }
     }
-    
+
+    /// call on song change, play, pause and seek. between those, iOS advances the
+    /// lock screen position by itself using the playback rate.
     private func updateNowPlayingInfo() {
         guard let song = currentSong else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
         }
-        
+
         var nowPlayingInfo: [String: Any] = [
             MPMediaItemPropertyTitle: song.title ?? "Unknown Title",
             MPMediaItemPropertyArtist: song.artist ?? "Unknown Artist",
             MPMediaItemPropertyAlbumTitle: song.albumTitle ?? "",
-            MPMediaItemPropertyPlaybackDuration: duration,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
+            MPMediaItemPropertyPlaybackDuration: audioPlayer?.duration ?? progress.duration,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: audioPlayer?.currentTime ?? progress.currentTime,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0
         ]
-        
-        // add artwork if available
+
         if let artwork = song.artwork {
             nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
         }
-        
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
-    }
-    
-    private func updateNowPlayingProgress() {
-        guard var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
-        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
-        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
 }
