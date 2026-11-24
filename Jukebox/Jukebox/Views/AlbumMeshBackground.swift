@@ -46,12 +46,21 @@ enum ArtworkPalette {
         let weights = render(output, bounds: bounds, count: count).map { $0[3] }
         let colors = render(output.settingAlphaOne(in: bounds), bounds: bounds, count: count)
 
-        let clusters = zip(colors, weights)
-            .filter { $0.1 > 0.01 }
-            .sorted { $0.1 > $1.1 }
-            .map { Color(.sRGB, red: Double($0.0[0]), green: Double($0.0[1]), blue: Double($0.0[2])) }
+        // pair each colour with its share, drop tiny clusters, most common first
+        var clusters: [(rgba: [Float], weight: Float)] = []
+        for index in 0..<min(colors.count, weights.count) where weights[index] > 0.01 {
+            clusters.append((rgba: colors[index], weight: weights[index]))
+        }
+        clusters.sort { $0.weight > $1.weight }
 
-        return clusters.isEmpty ? fallback : clusters
+        var result: [Color] = []
+        for cluster in clusters {
+            let red = Double(cluster.rgba[0])
+            let green = Double(cluster.rgba[1])
+            let blue = Double(cluster.rgba[2])
+            result.append(Color(.sRGB, red: red, green: green, blue: blue, opacity: 1))
+        }
+        return result.isEmpty ? fallback : result
     }
 
     private static func render(_ image: CIImage, bounds: CGRect, count: Int) -> [[Float]] {
