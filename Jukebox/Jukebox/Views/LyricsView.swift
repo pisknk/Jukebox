@@ -58,14 +58,7 @@ struct LyricsView: View {
     
     private var background: some View {
         Group {
-            if #available(iOS 26, *), AppDesign.isNativeGlass {
-                // native MeshGradient + CIKMeans colours (iOS 13 lyrics style)
-                AlbumMeshBackground(
-                    image: musicManager.currentArtwork,
-                    imageID: musicManager.currentSong?.persistentID,
-                    isAnimating: musicManager.isPlaying
-                )
-            } else if let song = musicManager.currentSong, let image = musicManager.currentArtwork {
+            if let song = musicManager.currentSong, let image = musicManager.currentArtwork {
                 AlbumFluidGradient(image: image, imageID: song.persistentID, isAnimating: musicManager.isPlaying)
             } else {
                 FluidGradientView(colors: [.purple, .blue, .pink, .orange], speed: 0.3, isAnimating: musicManager.isPlaying)
