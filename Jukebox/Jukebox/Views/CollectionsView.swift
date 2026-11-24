@@ -486,6 +486,7 @@ struct ArtistsListView: View {
         .onAppear {
             if allArtists.isEmpty { allArtists = LibraryQueries.allArtists() }
         }
+    }
 }
 
 // MARK: - Artist Row View
