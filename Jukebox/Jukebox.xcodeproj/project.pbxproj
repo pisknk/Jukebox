@@ -38,6 +38,7 @@
 		4A0B0C0D0000000000000011 /* AppDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0B0C0D0000000000000010 /* AppDesign.swift */; };
 		4A0B0C0D0000000000000013 /* LibrarySearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0B0C0D0000000000000012 /* LibrarySearchView.swift */; };
 		4A0B0C0D0000000000000015 /* AlbumMeshBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0B0C0D0000000000000014 /* AlbumMeshBackground.swift */; };
+		4A0B0C0D0000000000000017 /* MarqueeText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0B0C0D0000000000000016 /* MarqueeText.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -75,6 +76,7 @@
 		4A0B0C0D0000000000000010 /* AppDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDesign.swift; sourceTree = "<group>"; };
 		4A0B0C0D0000000000000012 /* LibrarySearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySearchView.swift; sourceTree = "<group>"; };
 		4A0B0C0D0000000000000014 /* AlbumMeshBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumMeshBackground.swift; sourceTree = "<group>"; };
+		4A0B0C0D0000000000000016 /* MarqueeText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarqueeText.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -134,6 +136,7 @@
 			isa = PBXGroup;
 			children = (
 				87C33F162EF314DE00F53354 /* SearchBar.swift */,
+				4A0B0C0D0000000000000016 /* MarqueeText.swift */,
 				4A0B0C0D0000000000000014 /* AlbumMeshBackground.swift */,
 				4A0B0C0D0000000000000012 /* LibrarySearchView.swift */,
 				4A0B0C0D000000000000000C /* CustomProgressSlider.swift */,
@@ -259,6 +262,7 @@
 				2B1A1A462C1A1A462C1A1A46 /* ArtistImageManager.swift in Sources */,
 				2B1A1A482C1A1A482C1A1A48 /* AirPlayButton.swift in Sources */,
 				2B1A1A502C1A1A502C1A1A50 /* SleepTimerManager.swift in Sources */,
+				4A0B0C0D0000000000000017 /* MarqueeText.swift in Sources */,
 				4A0B0C0D0000000000000015 /* AlbumMeshBackground.swift in Sources */,
 				4A0B0C0D0000000000000013 /* LibrarySearchView.swift in Sources */,
 				4A0B0C0D0000000000000011 /* AppDesign.swift in Sources */,

@@ -181,15 +181,18 @@ struct NativeMiniPlayer: View {
             .frame(width: isInline ? 28 : 32, height: isInline ? 28 : 32)
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
+            // long titles scroll to show the whole thing
             VStack(alignment: .leading, spacing: 1) {
-                Text(musicManager.currentSong?.title ?? "Not Playing")
-                    .font(.system(size: 14, weight: .medium))
-                    .lineLimit(1)
+                MarqueeText(
+                    text: musicManager.currentSong?.title ?? "Not Playing",
+                    font: .system(size: 14, weight: .medium)
+                )
                 if let artist = musicManager.currentSong?.artist {
-                    Text(artist)
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
+                    MarqueeText(
+                        text: artist,
+                        font: .system(size: 12),
+                        color: .secondary
+                    )
                 }
             }
 
