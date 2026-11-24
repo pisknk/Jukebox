@@ -25,6 +25,7 @@ struct SettingsView: View {
     // appearance
     @AppStorage("appTheme") private var appTheme = 0 // 0 = system, 1 = light, 2 = dark
     @AppStorage(AppDesign.storageKey) private var designLanguage: String = DesignLanguage.defaultValue.rawValue
+    @AppStorage(MotionArtworkManager.settingKey) private var animatedCovers = true
     
     /// the design picked in settings (may differ from the one running until restart)
     private var selectedDesign: DesignLanguage {
@@ -94,6 +95,17 @@ struct SettingsView: View {
                     }
                     
                     designLanguageRow
+                    
+                    // Native Glass only (the running design, not the one picked for next launch)
+                    if AppDesign.isNativeGlass {
+                        Toggle("Animated Album Covers", isOn: $animatedCovers)
+                            .onChange(of: animatedCovers) { _ in
+                                MotionArtworkManager.shared.settingChanged()
+                            }
+                        Text("Shows Apple Music's motion covers on Now Playing and the Lock Screen when an album has one. Paused in Low Power Mode.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 Section("About") {

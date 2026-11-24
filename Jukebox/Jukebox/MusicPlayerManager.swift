@@ -403,6 +403,8 @@ final class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegat
         currentSongStartedAt = Date()
 
         loadBitRate(for: song)
+        // look up / show this song's animated cover (Native Glass, iOS 26)
+        MotionArtworkManager.shared.songDidChange(song)
         updateNowPlayingInfo()
         LastFMManager.shared.nowPlaying(song)
     }
@@ -851,6 +853,11 @@ final class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegat
         }
     }
 
+    /// rebuild the lock screen info (e.g. when an animated cover becomes ready)
+    func refreshNowPlayingInfo() {
+        updateNowPlayingInfo()
+    }
+
     /// call on song change, play, pause and seek. between those, iOS advances the
     /// lock screen position by itself using the playback rate.
     private func updateNowPlayingInfo() {
@@ -870,6 +877,11 @@ final class MusicPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegat
 
         if let artwork = song.artwork {
             nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        }
+
+        // iOS 26 animated cover on the lock screen (Native Glass only)
+        if let animated = MotionArtworkManager.shared.lockScreenEntry(still: song.artwork) {
+            nowPlayingInfo[animated.key] = animated.value
         }
 
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo

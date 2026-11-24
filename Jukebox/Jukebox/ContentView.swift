@@ -294,6 +294,12 @@ struct NowPlayingModalView: View {
     @State private var toastID = 0
     @State private var navigateToArtist: Bool = false
     @State private var navigateToAlbum: Bool = false
+    @ObservedObject private var motion = MotionArtworkManager.shared
+    
+    /// Native Glass: the song's animated album cover, shown full-width at the top
+    private var fullBleedVideo: URL? {
+        AppDesign.isNativeGlass ? motion.currentVideo : nil
+    }
     
     // init with optional binding for backward compatibility
     init(isPresented: Binding<Bool>? = nil) {
@@ -309,6 +315,28 @@ struct NowPlayingModalView: View {
                 // gradient background from album artwork with fade transition
                 nowPlayingBackground
                     .opacity(gradientOpacity)
+                
+                // animated album cover across the top, fading into the background
+                if let video = fullBleedVideo {
+                    VStack(spacing: 0) {
+                        LoopingVideoView(url: video, isPlaying: musicManager.isPlaying)
+                            .frame(width: geometry.size.width, height: geometry.size.width * 4 / 3)
+                            .clipped()
+                            .mask(
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: .black, location: 0),
+                                        .init(color: .black, location: 0.68),
+                                        .init(color: .clear, location: 1)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                        Spacer(minLength: 0)
+                    }
+                    .transition(.opacity)
+                }
                 
                 VStack(spacing: 0) {
                     Spacer().frame(height: 20)
@@ -342,6 +370,7 @@ struct NowPlayingModalView: View {
             }
         }
         .ignoresSafeArea()
+        .animation(.easeInOut(duration: 0.6), value: fullBleedVideo)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showQueue) {
             QueueView(isPresented: $showQueue)
@@ -425,6 +454,10 @@ struct NowPlayingModalView: View {
     // MARK: - Main Content
     @ViewBuilder
     private func nowPlayingContent(for song: MPMediaItem, in geometry: GeometryProxy) -> some View {
+        if fullBleedVideo != nil {
+            // the animated cover fills the top; the song info sits over its faded bottom
+            Spacer().frame(height: fullBleedInfoOffset(in: geometry))
+        } else {
         Group {
             Spacer().frame(height: 60)
             
@@ -444,6 +477,7 @@ struct NowPlayingModalView: View {
             }
             
             Spacer().frame(height: 24)
+        }
         }
         
         // song info
@@ -574,6 +608,14 @@ struct NowPlayingModalView: View {
             Spacer()
         }
         .padding(.bottom, 34)
+    }
+    
+    /// where the song info starts under a full-width animated cover: over the cover's faded
+    /// bottom, but never so low that the controls run off a small screen
+    private func fullBleedInfoOffset(in geometry: GeometryProxy) -> CGFloat {
+        let coverHeight = geometry.size.width * 4 / 3
+        let fitsControls = geometry.size.height - 470
+        return max(60, min(coverHeight - 140, fitsControls))
     }
     
     // MARK: - No Song View
