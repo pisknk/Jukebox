@@ -105,6 +105,9 @@ struct AmityRootView: View {
             // hide the default tab bar
             UITabBar.appearance().isHidden = true
             
+            // the search tab only exists in Native Glass
+            if selectedTab > 1 { selectedTab = 0 }
+            
             if !musicManager.hasPermission && MPMediaLibrary.authorizationStatus() == .notDetermined {
                 musicManager.checkPermission()
             }
@@ -126,6 +129,10 @@ struct NativeGlassRootView: View {
             }
             Tab("Collections", systemImage: "square.grid.2x2", value: 1) {
                 CollectionsView()
+            }
+            // the round search button beside the tab bar; the field opens at the bottom
+            Tab(value: 2, role: .search) {
+                LibrarySearchView()
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)

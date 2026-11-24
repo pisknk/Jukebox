@@ -113,7 +113,7 @@ struct LibraryView: View {
     
     // MARK: - Layouts
 
-    /// Native Glass: system large title, toolbar buttons and search field
+    /// Native Glass: system large title and toolbar buttons (search is its own tab)
     private var nativeLayout: some View {
         libraryContent
             .navigationTitle("Jukebox")
@@ -126,7 +126,7 @@ struct LibraryView: View {
                     .accessibilityLabel("Settings")
                 }
             }
-            .adaptiveSearchable(text: $searchText, prompt: "Search songs, artists, albums")
+        // search lives in the Search tab next to the tab bar
     }
 
     /// Amity 1.0: custom header with blur and the custom search bar
